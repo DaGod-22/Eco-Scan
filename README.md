@@ -43,8 +43,8 @@ entirely in the user's browser.
 
 ## Notes
 
-- The object-detection model (~160 MB of ONNX weights) is downloaded on first use and cached
-  by the browser for subsequent sessions.
+- The object-detection model (`Xenova/detr-resnet-50`, ~40 MB of quantized ONNX weights) is
+  downloaded on first use and cached by the browser for subsequent sessions.
 - Camera access requires a secure context (HTTPS) — this is automatic on Vercel/Cloudflare.
 - For ambiguous results, the app clearly labels outputs as AI-assisted estimates and reminds
   users to check the official "Which Bin" rules.
