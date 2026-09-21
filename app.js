@@ -66,6 +66,11 @@ const ICONS = {
   phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>',
   ewaste: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="m10 10 2 2 2-2"/>',
   gas: '<path d="M9 2h6v3H9z"/><path d="M8 5h8v15a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2Z"/><path d="M10 10h4"/>',
+  foil: '<path d="M4 6h16l-2 12H6z"/><path d="M4 6l16 2"/><path d="M8 14l8-2"/>',
+  bag: '<path d="M6 7h12l-1 14H7z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/>',
+  envelope: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 6l10 7 10-7"/>',
+  tyre: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  cable: '<path d="M4 12h6"/><path d="M14 12h6"/><path d="M10 8a4 4 0 0 1 4 4"/><path d="M10 16a4 4 0 0 0 4-4"/>',
 };
 
 function icon(name, size) {
@@ -83,13 +88,18 @@ const esc = (s) => String(s == null ? "" : s)
    ------------------------------------------------------------------ */
 let cameraStream = null;
 let detector = null;
+let classifier = null;
 let modelLoading = false;
 let modelFailed = false;
 let modelBackend = null;
+let classifierLoading = false;
+let classifierFailed = false;
+let classifierBackend = null;
 let camState = "starting"; // starting | live | error | paused | off
 let scanning = false;
 let lastCaptureW = 640;
 let lastCaptureH = 480;
+let transformersMod = null; // cached import
 
 let gameScore = 0;
 let answered = 0;
@@ -137,6 +147,12 @@ const MODEL_MB = (MODEL_BYTES / 1048576).toFixed(1);
 // ort-wasm-simd-threaded.jsep.wasm shipped inside the same npm package.
 const WASM_BYTES = 23929658;
 const FIRST_RUN_MB = ((MODEL_BYTES + WASM_BYTES) / 1048576).toFixed(0);
+
+// Classification fallback — tiny model that recognises ~1000 ImageNet classes
+// Used only when DETR returns empty or unknown, to catch bottles, cans, etc.
+const CLASSIFICATION_MODEL_ID = "Xenova/mobilenet_v3_small_100_224";
+const CLASSIFICATION_THRESHOLD = 0.28;
+const CLASSIFICATION_MODEL_MB = "4.0";
 
 /* ==================================================================
    NAVIGATION
@@ -375,6 +391,7 @@ const TRANSFORMERS_FALLBACKS = [
 ];
 
 async function importTransformersWithFallback() {
+  if (transformersMod) return transformersMod;
   const urls = [TRANSFORMERS_URL, ...TRANSFORMERS_FALLBACKS.filter(u => u !== TRANSFORMERS_URL)];
   let lastErr = null;
   for (const url of urls) {
@@ -383,10 +400,12 @@ async function importTransformersWithFallback() {
       try { host = new URL(url, location.href).hostname; } catch (_) { host = url; }
       setModelLoading("Loading AI engine from " + host + "…", 0);
       const mod = await import(url);
-      if (mod && typeof mod.pipeline === "function") return mod;
-      // Some bundles expose default
-      if (mod && mod.default && typeof mod.default.pipeline === "function") return mod.default;
-      throw new Error("pipeline not found in " + url);
+      let resolved = null;
+      if (mod && typeof mod.pipeline === "function") resolved = mod;
+      else if (mod && mod.default && typeof mod.default.pipeline === "function") resolved = mod.default;
+      else throw new Error("pipeline not found in " + url);
+      transformersMod = resolved;
+      return resolved;
     } catch (e) {
       console.warn("Transformers import failed for", url, e);
       lastErr = e;
@@ -472,11 +491,13 @@ async function loadDetector(opts = {}) {
 }
 
 /* ==================================================================
-   CLASSIFICATION PIPELINE (layers 2 → 5)
+   CLASSIFICATION PIPELINE (layers 2 → 5) — now handles multiple
+   detections ranked by disposal confidence + classification fallback
    ================================================================== */
 
 /**
  * Coerce a detection score to a 0–1 fraction.
+ * Accepts both 0-1 and 0-100 ranges.
  */
 function normaliseScore(raw) {
   let s = Number(raw);
@@ -485,34 +506,28 @@ function normaliseScore(raw) {
   return Math.max(0, Math.min(1, s));
 }
 
-/** Layer 2+3+4+5 for a single detection. */
-function analyseDetection(det) {
-  const rawLabel = String((det && det.label) || "").toLowerCase().trim();
-  const detectionScore = normaliseScore(det && det.score);
+function boxAreaFraction(box) {
+  const norm = normalizeBoxToFraction(box);
+  if (!norm) return 0;
+  return Math.max(0, norm.w) * Math.max(0, norm.h);
+}
 
-  // Layer 2 — object recognition result → waste-relevant concept
-  if (!Object.prototype.hasOwnProperty.call(LABEL_TO_CONCEPT, rawLabel)) {
-    return {
-      rawLabel, detectionScore, concept: null, category: "none",
-      materialShare: 0, conditionRisk: 0, disposalScore: 0,
-      band: confidenceBand(0), alternatives: [],
-      reason: "unknown-label",
-    };
-  }
-
-  const conceptKey = LABEL_TO_CONCEPT[rawLabel];
+/**
+ * Core analysis for a concept key — shared by detection and classification.
+ */
+function analyseConceptKey(conceptKey, detectionScore, rawLabel, sourceType = "detection") {
   const concept = CONCEPTS[conceptKey];
   if (!concept) {
-    console.warn("Concept missing for label:", rawLabel, "→", conceptKey);
+    console.warn("Concept missing:", conceptKey, "←", rawLabel);
     return {
       rawLabel, detectionScore, concept: null, category: "none",
       materialShare: 0, conditionRisk: 0, disposalScore: 0,
       band: confidenceBand(0), alternatives: [],
       reason: "missing-concept",
+      sourceType,
     };
   }
 
-  // Layer 3 — aggregate materials by the category they lead to
   const totalWeight = concept.materials.reduce((s, m) => s + Math.max(0, m.weight || 0), 0) || 1;
   const byCategory = new Map();
   for (const m of concept.materials) {
@@ -520,9 +535,8 @@ function analyseDetection(det) {
     byCategory.set(m.category, (byCategory.get(m.category) || 0) + w);
   }
   const ranked = Array.from(byCategory.entries()).sort((a, b) => b[1] - a[1]);
-  const [topCategory, materialShare] = ranked[0];
+  const [topCategory, materialShare] = ranked[0] || ["none", 0];
 
-  // A concept whose most likely material is itself "uncertain" cannot yield a verdict.
   if (topCategory === "uncertain") {
     return {
       rawLabel, detectionScore, concept, category: "uncertain",
@@ -530,15 +544,14 @@ function analyseDetection(det) {
       band: confidenceBand(0),
       alternatives: ranked.filter(([c]) => c !== "uncertain").map(([c, w]) => ({ category: c, share: w })),
       reason: "material-ambiguous",
+      sourceType,
     };
   }
 
-  // Layer 5 — disposal confidence
   const conditionRisk = concept.conditionRisk || 0;
   const disposalScore = disposalConfidence(detectionScore, materialShare, conditionRisk);
   const band = confidenceBand(disposalScore);
 
-  // Layer 6 — verdict, or an explicit refusal to guess
   return {
     rawLabel, detectionScore, concept,
     category: band.key === "low" ? "uncertain" : topCategory,
@@ -546,7 +559,172 @@ function analyseDetection(det) {
     materialShare, conditionRisk, disposalScore, band,
     alternatives: ranked.slice(1).map(([category, share]) => ({ category, share })),
     reason: band.key === "low" ? "low-confidence" : "ok",
+    sourceType,
   };
+}
+
+/** Layer 2+3+4+5 for a single detection. */
+function analyseDetection(det) {
+  const rawLabel = String((det && det.label) || "").toLowerCase().trim();
+  const detectionScore = normaliseScore(det && det.score);
+
+  if (!Object.prototype.hasOwnProperty.call(LABEL_TO_CONCEPT, rawLabel)) {
+    return {
+      rawLabel, detectionScore, concept: null, category: "none",
+      materialShare: 0, conditionRisk: 0, disposalScore: 0,
+      band: confidenceBand(0), alternatives: [],
+      reason: "unknown-label",
+      sourceType: "detection",
+    };
+  }
+
+  const conceptKey = LABEL_TO_CONCEPT[rawLabel];
+  return analyseConceptKey(conceptKey, detectionScore, rawLabel, "detection");
+}
+
+/* ---------------- Classification fallback mapping ---------------- */
+
+const CLASSIFICATION_KEYWORDS = [
+  { keys: ["water bottle", "pop bottle", "beer bottle", "wine bottle", "bottle", "milk can", "pop can", "beer can", "tin can", "can", "beer glass", "red wine", "measuring cup"], concept: "bottle" },
+  { keys: ["book jacket", "book", "paperback"], concept: "book" },
+  { keys: ["banana", "apple", "orange", "broccoli", "carrot", "lemon", "strawberry", "pineapple", "mushroom", "bell pepper", "cucumber", "corn", "cauliflower", "zucchini", "artichoke", "custard apple", "pomegranate", "fig", "guacamole", "fruit", "vegetable", "granny smith"], concept: "food-fresh" },
+  { keys: ["pizza", "sandwich", "hot dog", "hamburger", "cheeseburger", "cake", "donut", "bagel", "pretzel", "burrito", "taco", "carbonara", "meat loaf", "potpie", "burrito"], concept: "food-prepared" },
+  { keys: ["wine glass", "goblet"], concept: "drinking-glass" },
+  { keys: ["cup", "mug", "espresso", "coffee mug", "cup"], concept: "cup-mug" },
+  { keys: ["bowl", "plate", "platter", "crockery", "mixing bowl", "soup bowl"], concept: "crockery" },
+  { keys: ["vase"], concept: "glass-decor" },
+  { keys: ["mirror"], concept: "mirror" },
+  { keys: ["window"], concept: "window-glass" },
+  { keys: ["fork", "knife", "spoon", "cutlery", "ladle", "spatula", "cleaver"], concept: "cutlery" },
+  { keys: ["cell phone", "mobile phone", "iphone", "smartphone", "cellphone", "phone"], concept: "phone" },
+  { keys: ["remote", "keyboard", "mouse", "joystick", "computer mouse"], concept: "electronics-small" },
+  { keys: ["laptop", "notebook", "tablet", "ipad"], concept: "electronics-portable" },
+  { keys: ["television", "monitor", "screen", "crt screen", "tv"], concept: "electronics-large" },
+  { keys: ["toaster", "blender", "hair dryer", "microwave", "oven", "refrigerator", "vacuum", "washer", "dryer", "coffee maker", "espresso maker", "frying pan", "wok", "dutch oven"], concept: "appliance-small" },
+  { keys: ["refrigerator", "fridge"], concept: "appliance-large" },
+  { keys: ["clock", "analog clock", "wall clock", "watch", "digital watch", "wristwatch"], concept: "battery-product" },
+  { keys: ["hat", "tie", "shoe", "handbag", "backpack", "suitcase", "clothing", "shirt", "jacket", "jeans", "sweater", "textile", "wool", "jean", "cardigan", "jersey"], concept: "textile" },
+  { keys: ["frisbee", "sports ball", "ball", "football", "basketball", "tennis ball", "golf ball", "soccer ball", "volleyball", "baseball", "rugby ball"], concept: "rigid-plastic-goods" },
+  { keys: ["toothbrush", "scissors", "eyeglasses", "sunglasses", "sunglass"], concept: "small-mixed-plastic" },
+  { keys: ["teddy bear", "teddy", "toy", "doll", "teddy bear", "jigsaw puzzle"], concept: "soft-toy" },
+  { keys: ["chair", "couch", "sofa", "bed", "desk", "table", "bench", "furniture", "bookcase", "filing cabinet"], concept: "furniture" },
+  { keys: ["door", "sink", "toilet", "bathtub", "shower curtain"], concept: "building-fixture" },
+  { keys: ["person", "people", "man", "woman", "child", "boy", "girl", "dog", "cat", "bird", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter"], concept: "not-waste" },
+  // Extra waste-relevant ImageNet labels
+  { keys: ["plastic bag", "shopping bag", "trash bag", "bin bag", "polythene"], concept: "mixed-goods" },
+  { keys: ["cardboard", "carton", "envelope", "packet", "mailbag"], concept: "book" },
+  { keys: ["aluminum foil", "tin foil", "foil"], concept: "bottle" },
+  { keys: ["candle", "lighter"], concept: "small-mixed-plastic" },
+  { keys: ["broom", "mop", "brush"], concept: "mixed-goods" },
+  { keys: ["bucket", "pail", "barrel"], concept: "bottle" },
+  { keys: ["ashcan", "trash can", "dustbin", "wastebin"], concept: "bulky-goods" },
+];
+
+function classificationLabelToConceptKey(label) {
+  const low = String(label || "").toLowerCase();
+  // Exact match first via LABEL_TO_CONCEPT (for COCO overlap)
+  if (Object.prototype.hasOwnProperty.call(LABEL_TO_CONCEPT, low)) return LABEL_TO_CONCEPT[low];
+  // Keyword substring match — longest keys first for specificity
+  const sorted = CLASSIFICATION_KEYWORDS.slice().sort((a, b) => Math.max(...b.keys.map(k => k.length)) - Math.max(...a.keys.map(k => k.length)));
+  for (const entry of sorted) {
+    for (const k of entry.keys) {
+      if (low.includes(k)) return entry.concept;
+    }
+  }
+  return null;
+}
+
+async function loadClassifier(opts = {}) {
+  if (classifier && !opts.force) return classifier;
+  if (classifierLoading) return null;
+  classifierLoading = true;
+  classifierFailed = false;
+
+  try {
+    const mod = await importTransformersWithFallback();
+    const pipeline = mod.pipeline;
+    const env = mod.env;
+    if (env) {
+      env.allowLocalModels = false;
+      if ("useBrowserCache" in env) env.useBrowserCache = true;
+    }
+
+    setModelLoading("Loading image classifier (~" + CLASSIFICATION_MODEL_MB + " MB) for fallback…", 10);
+    const errors = [];
+    for (const step of deviceLadder()) {
+      if (env && env.backends && env.backends.onnx && env.backends.onnx.wasm) {
+        env.backends.onnx.wasm.proxy = !!step.proxy;
+      }
+      try {
+        classifier = await pipeline("image-classification", CLASSIFICATION_MODEL_ID, {
+          ...step.opts,
+          progress_callback: (p) => {
+            if (!p) return;
+            if (p.status === "progress") {
+              const pct = Number.isFinite(p.progress) ? Math.round(p.progress) : 0;
+              setModelLoading("Downloading classifier " + (p.file || "") + " · " + step.label + "…", pct);
+            }
+          },
+        });
+        classifierBackend = step.label + (step.proxy ? " · threaded" : "");
+        // Do not call setModelReady — detector is still primary
+        return classifier;
+      } catch (e) {
+        console.warn("Classifier backend failed", step.label, e);
+        errors.push(String(e && e.message ? e.message : e));
+        classifier = null;
+      }
+    }
+    throw new Error(errors.join(" | "));
+  } catch (err) {
+    console.error("Classifier load failed", err);
+    classifier = null;
+    classifierFailed = true;
+    return null;
+  } finally {
+    classifierLoading = false;
+  }
+}
+
+async function tryClassificationFallback(frame) {
+  if (!frame) return null;
+  try {
+    const clf = classifier || await loadClassifier();
+    if (!clf) return null;
+
+    const results = await withTimeout(clf(frame, { topk: 5 }), 20000, "Classification timed out");
+    const list = Array.isArray(results) ? results : [results];
+
+    const candidates = [];
+    for (const r of list) {
+      const score = normaliseScore(r.score);
+      if (score < CLASSIFICATION_THRESHOLD) continue;
+      const conceptKey = classificationLabelToConceptKey(r.label);
+      if (!conceptKey) continue;
+      const analysis = analyseConceptKey(conceptKey, score, String(r.label || "").toLowerCase(), "classification");
+      if (!analysis) continue;
+      if (analysis.category === "none") continue;
+      // Boost if disposalScore decent
+      candidates.push({ result: r, analysis, score });
+    }
+
+    if (!candidates.length) return null;
+
+    // Rank by disposalScore, then raw score
+    candidates.sort((a, b) => {
+      if (b.analysis.disposalScore !== a.analysis.disposalScore) return b.analysis.disposalScore - a.analysis.disposalScore;
+      return b.score - a.score;
+    });
+
+    const best = candidates[0].analysis;
+    // Only return if at least partly confident or material not ambiguous
+    if (best.category === "none") return null;
+    // If uncertain but classification is our only hope, still return it — UI will show uncertain
+    return best;
+  } catch (err) {
+    console.warn("Classification fallback failed", err);
+    return null;
+  }
 }
 
 /* ==================================================================
@@ -701,8 +879,6 @@ function withTimeout(promise, ms, message) {
 async function runScan() {
   if (scanning) return;
 
-  // FIX: previous version returned silently when camState was \"starting\",
-  // so clicking Scan while camera was still initializing did nothing.
   if (camState !== "live") {
     const started = await ensureCamera();
     if (!started || camState !== "live") {
@@ -741,10 +917,8 @@ async function runScan() {
 
   try {
     const frame = captureFrame();
-    // NOTE: no `percentage: true`. That option multiplies every score by 100,
-    // which silently collapsed the whole confidence model.
     const outputs = await withTimeout(detector(frame, { threshold: SCAN_THRESHOLD }), SCAN_TIMEOUT_MS, "Inference timed out");
-    handleDetections(outputs);
+    await handleDetections(outputs, frame);
   } catch (err) {
     console.error("Scan failed:", err);
     clearOverlay();
@@ -760,36 +934,110 @@ async function runScan() {
   }
 }
 
-function handleDetections(outputs) {
+/**
+ * New multi-object pipeline:
+ * - Analyses ALL detections above threshold, not just top score
+ * - Ranks by disposal confidence (not just detection confidence)
+ * - Falls back to image classification when DETR is empty/unknown
+ * - Handles material ambiguity by surfacing alternatives
+ */
+async function handleDetections(outputs, frame) {
   const list = Array.isArray(outputs) ? outputs.slice() : [];
 
-  if (!list.length) {
+  // Always draw what we have, even if empty (clears)
+  if (list.length) {
+    // Sort initially by detection score for drawing order (top = highest)
+    list.sort((a, b) => (b.score || 0) - (a.score || 0));
+    drawDetections(list);
+  } else {
     clearOverlay();
+  }
+
+  // Analyse every detection into disposal terms
+  const analysed = list.map((det) => {
+    const analysis = analyseDetection(det);
+    const area = boxAreaFraction(det.box);
+    return { det, analysis, area, score: det.score || 0 };
+  });
+
+  // Filter out truly unknown labels for primary ranking, but keep them for "also"
+  const known = analysed.filter(x => x.analysis && x.analysis.category !== "none");
+  const unknown = analysed.filter(x => !x.analysis || x.analysis.category === "none");
+
+  // Rank known by: disposalScore desc, then detectionScore desc, then box area desc
+  known.sort((a, b) => {
+    if (b.analysis.disposalScore !== a.analysis.disposalScore) return b.analysis.disposalScore - a.analysis.disposalScore;
+    if (b.analysis.detectionScore !== a.analysis.detectionScore) return b.analysis.detectionScore - a.analysis.detectionScore;
+    if (b.area !== a.area) return b.area - a.area;
+    return b.score - a.score;
+  });
+
+  const others = analysed.slice(0, 6).map(x => {
+    const label = String(x.det.label || x.analysis.rawLabel || "unknown").toLowerCase();
+    const pct = Math.round((x.analysis.detectionScore || x.score || 0) * 100);
+    const cat = x.analysis.confidentCategory || x.analysis.category;
+    const catShort = (CATEGORIES[cat] && CATEGORIES[cat].short) ? " → " + CATEGORIES[cat].short : "";
+    return label + " " + pct + "%" + catShort;
+  }).filter((_, i) => i > 0).slice(0, 4);
+
+  // Case 1: nothing detected at all — try classification fallback
+  if (!list.length) {
+    const fallback = await tryClassificationFallback(frame);
+    if (fallback) {
+      // Show fallback as primary
+      renderScanResult(fallback, others);
+      return;
+    }
     renderNoVerdict({
       title: "NO OBJECT DETECTED",
       meta: "Nothing above " + Math.round(SCAN_THRESHOLD * 100) + "% detection confidence",
-      body: "The scanner could not confidently identify anything in that frame. Move closer so the item fills the frame, improve the lighting, and scan again — or use the manual lookup below.",
+      body: "The scanner could not confidently identify anything in that frame. Move closer so the item fills the frame, improve the lighting, and scan again — or use the manual lookup below. The app also tried a secondary image classifier (~" + CLASSIFICATION_MODEL_MB + " MB) and found nothing recognisable.",
     });
     return;
   }
 
-  list.sort((a, b) => (b.score || 0) - (a.score || 0));
-  drawDetections(list);
-
-  const analysis = analyseDetection(list[0]);
-  const others = list.slice(1, 4).map((d) => String(d.label || "").toLowerCase() + " " + Math.round((d.score || 0) * 100) + "%");
-
-  if (analysis.category === "none") {
+  // Case 2: all detections are unknown labels
+  if (!known.length) {
+    const fallback = await tryClassificationFallback(frame);
+    if (fallback) {
+      renderScanResult(fallback, others);
+      return;
+    }
+    const firstUnknown = analysed[0] ? analysed[0].analysis : { rawLabel: "unknown", detectionScore: 0 };
     renderNoVerdict({
       title: "ITEM NOT RECOGNISED",
-      meta: "Detected: " + esc(analysis.rawLabel || "unknown") + " · " + Math.round(analysis.detectionScore * 100) + "% detection confidence",
-      body: "The scanner found something but has no South Australian disposal rule for it. Check the manual lookup below or the official Which Bin guide rather than guessing.",
+      meta: "Detected: " + esc(firstUnknown.rawLabel || "unknown") + " · " + Math.round((firstUnknown.detectionScore || 0) * 100) + "% detection confidence",
+      body: "The scanner found something but has no South Australian disposal rule for it. It also tried a secondary classifier that knows ~1000 everyday objects and still could not map it to a bin. Check the manual lookup below or the official Which Bin guide rather than guessing.",
       also: others,
     });
     return;
   }
 
-  renderScanResult(analysis, others);
+  // Case 3: we have at least one known concept — pick best by disposalScore
+  const best = known[0];
+
+  // If best is uncertain/low-confidence, see if classification can do better
+  if (best.analysis.category === "uncertain" || best.analysis.disposalScore < 0.5) {
+    const fallback = await tryClassificationFallback(frame);
+    if (fallback && fallback.disposalScore > best.analysis.disposalScore && fallback.category !== "uncertain" && fallback.category !== "none") {
+      // Prefer confident classification over uncertain detection
+      const combinedOthers = [best.analysis.rawLabel + " " + Math.round(best.analysis.detectionScore * 100) + "% → " + (CATEGORIES[best.analysis.confidentCategory]?.short || best.analysis.category), ...others].slice(0, 4);
+      renderScanResult(fallback, combinedOthers);
+      return;
+    }
+  }
+
+  // If best is not-waste (person, animal, vehicle), but there is a waste item also present, prefer waste
+  if (best.analysis.category === "notwaste") {
+    const wasteCandidate = known.find(x => x.analysis.category !== "notwaste" && x.analysis.category !== "none");
+    if (wasteCandidate) {
+      renderScanResult(wasteCandidate.analysis, others);
+      return;
+    }
+  }
+
+  // Normal confident path
+  renderScanResult(best.analysis, others);
 }
 
 /* ==================================================================

@@ -66,6 +66,11 @@ const ICONS = {
   phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>',
   ewaste: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="m10 10 2 2 2-2"/>',
   gas: '<path d="M9 2h6v3H9z"/><path d="M8 5h8v15a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2Z"/><path d="M10 10h4"/>',
+  foil: '<path d="M4 6h16l-2 12H6z"/><path d="M4 6l16 2"/><path d="M8 14l8-2"/>',
+  bag: '<path d="M6 7h12l-1 14H7z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/>',
+  envelope: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 6l10 7 10-7"/>',
+  tyre: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  cable: '<path d="M4 12h6"/><path d="M14 12h6"/><path d="M10 8a4 4 0 0 1 4 4"/><path d="M10 16a4 4 0 0 0 4-4"/>',
 };
 
 function icon(name, size) {
@@ -83,11 +88,18 @@ const esc = (s) => String(s == null ? "" : s)
    ------------------------------------------------------------------ */
 let cameraStream = null;
 let detector = null;
+let classifier = null;
 let modelLoading = false;
 let modelFailed = false;
 let modelBackend = null;
+let classifierLoading = false;
+let classifierFailed = false;
+let classifierBackend = null;
 let camState = "starting"; // starting | live | error | paused | off
 let scanning = false;
+let lastCaptureW = 640;
+let lastCaptureH = 480;
+let transformersMod = null; // cached import
 
 let gameScore = 0;
 let answered = 0;
@@ -104,7 +116,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const video = $("#webcam");
 const captureCanvas = $("#capture");
-const captureCtx = captureCanvas.getContext("2d", { willReadFrequently: true });
+const captureCtx = captureCanvas ? captureCanvas.getContext("2d", { willReadFrequently: true }) : null;
 const overlayCanvas = $("#overlay");
 const overlayCtx = overlayCanvas ? overlayCanvas.getContext("2d") : null;
 const cameraBox = $("#camera");
@@ -123,6 +135,10 @@ const resultContent = $("#result-content");
 
 const SCAN_THRESHOLD = 0.45;
 const SCAN_TIMEOUT_MS = 90000;
+// FIX: previous URL transformers.web.min.js is not a self-contained ESM.
+// It starts with `import * as e from \"onnxruntime-common\"` and fails in
+// browsers with bare specifier errors, so the model never loads.
+// jsDelivr +esm rewrites those to absolute ESM URLs and works.
 const TRANSFORMERS_URL = "./stub-transformers.mjs";
 const MODEL_ID = "Xenova/detr-resnet-50";
 // onnx/model_quantized.onnx for MODEL_ID, measured from the repo tree.
@@ -131,6 +147,12 @@ const MODEL_MB = (MODEL_BYTES / 1048576).toFixed(1);
 // ort-wasm-simd-threaded.jsep.wasm shipped inside the same npm package.
 const WASM_BYTES = 23929658;
 const FIRST_RUN_MB = ((MODEL_BYTES + WASM_BYTES) / 1048576).toFixed(0);
+
+// Classification fallback — tiny model that recognises ~1000 ImageNet classes
+// Used only when DETR returns empty or unknown, to catch bottles, cans, etc.
+const CLASSIFICATION_MODEL_ID = "Xenova/mobilenet_v3_small_100_224";
+const CLASSIFICATION_THRESHOLD = 0.28;
+const CLASSIFICATION_MODEL_MB = "4.0";
 
 /* ==================================================================
    NAVIGATION
@@ -160,43 +182,45 @@ $$(".bnav-item").forEach((btn) => btn.addEventListener("click", () => activateTa
    ================================================================== */
 function setCamState(state, message) {
   camState = state;
-  camDot.classList.remove("live", "error");
-  cameraBox.classList.remove("live", "scanning");
-  cameraState.classList.remove("error");
+  if (camDot) camDot.classList.remove("live", "error");
+  if (cameraBox) cameraBox.classList.remove("live", "scanning");
+  if (cameraState) cameraState.classList.remove("error");
 
   if (state === "live") {
-    camDot.classList.add("live");
-    cameraBox.classList.add("live");
-    camStatus.textContent = "live";
-    cameraState.innerHTML = "";
-    video.classList.add("active");
+    if (camDot) camDot.classList.add("live");
+    if (cameraBox) cameraBox.classList.add("live");
+    if (camStatus) camStatus.textContent = "live";
+    if (cameraState) cameraState.innerHTML = "";
+    if (video) video.classList.add("active");
   } else if (state === "error") {
-    camDot.classList.add("error");
+    if (camDot) camDot.classList.add("error");
     cameraStatusError(message);
   } else if (state === "paused") {
-    camStatus.textContent = "paused";
-    cameraState.innerHTML = '<p>' + icon("cameraOff", 18) + " Camera paused. Return to the Scan tab to resume.</p>";
-    video.classList.remove("active");
+    if (camStatus) camStatus.textContent = "paused";
+    if (cameraState) cameraState.innerHTML = '<p>' + icon("cameraOff", 18) + " Camera paused. Return to the Scan tab to resume.</p>";
+    if (video) video.classList.remove("active");
   } else if (state === "off") {
-    camStatus.textContent = "off";
-    cameraState.innerHTML = '<p>' + icon("cameraOff", 18) + " Camera released while this tab was hidden. Press Scan Item to restart it.</p>";
-    video.classList.remove("active");
+    if (camStatus) camStatus.textContent = "off";
+    if (cameraState) cameraState.innerHTML = '<p>' + icon("cameraOff", 18) + " Camera released while this tab was hidden. Press Scan Item to restart it.</p>";
+    if (video) video.classList.remove("active");
   } else {
-    camStatus.textContent = "starting";
-    cameraState.innerHTML = "<p>Requesting camera access…</p>";
-    video.classList.remove("active");
+    if (camStatus) camStatus.textContent = "starting";
+    if (cameraState) cameraState.innerHTML = "<p>Requesting camera access…</p>";
+    if (video) video.classList.remove("active");
   }
   syncScanButton();
 }
 
 function cameraStatusError(message) {
-  camStatus.textContent = "no camera";
-  cameraState.classList.add("error");
-  cameraState.innerHTML =
-    '<p>' + esc(message || "Camera unavailable.") + '</p>' +
-    '<button class="btn btn-ghost btn-sm" type="button" id="cam-retry">' + icon("refresh", 16) + " Try again</button>";
-  const retry = $("#cam-retry");
-  if (retry) retry.addEventListener("click", () => { startCamera(); });
+  if (camStatus) camStatus.textContent = "no camera";
+  if (cameraState) {
+    cameraState.classList.add("error");
+    cameraState.innerHTML =
+      '<p>' + esc(message || "Camera unavailable.") + '</p>' +
+      '<button class="btn btn-ghost btn-sm" type="button" id="cam-retry">' + icon("refresh", 16) + " Try again</button>";
+    const retry = $("#cam-retry");
+    if (retry) retry.addEventListener("click", () => { startCamera(); });
+  }
 }
 
 async function startCamera() {
@@ -221,8 +245,28 @@ async function startCamera() {
       }
     }
     cameraStream = stream;
-    video.srcObject = cameraStream;
-    await video.play();
+    if (video) {
+      video.srcObject = cameraStream;
+      // Ensure video metadata is loaded before play
+      if (video.readyState < 1) {
+        await new Promise((res, rej) => {
+          const onLoaded = () => { cleanup(); res(); };
+          const onErr = (e) => { cleanup(); rej(e); };
+          const cleanup = () => {
+            video.removeEventListener("loadedmetadata", onLoaded);
+            video.removeEventListener("error", onErr);
+          };
+          video.addEventListener("loadedmetadata", onLoaded, { once: true });
+          video.addEventListener("error", onErr, { once: true });
+          // safety timeout
+          setTimeout(() => { cleanup(); res(); }, 1500);
+        });
+      }
+      try { await video.play(); } catch (playErr) {
+        // Autoplay may be blocked, but we still have stream
+        console.warn("video.play() failed:", playErr);
+      }
+    }
     setCamState("live");
     return true;
   } catch (err) {
@@ -248,7 +292,7 @@ function stopStream() {
     try { cameraStream.getTracks().forEach((t) => t.stop()); } catch (err) { console.warn("Could not stop a camera track:", err); }
     cameraStream = null;
   }
-  if (video.srcObject) video.srcObject = null;
+  if (video && video.srcObject) video.srcObject = null;
   clearOverlay();
 }
 
@@ -271,15 +315,6 @@ function ensureCamera() {
  * Every step here resolves to the SAME file on the model repo
  * (onnx/model_quantized.onnx, 41.1 MiB), so retrying a failed backend is free —
  * the bytes are already in the HTTP cache.
- *
- * This ladder used to escalate to webgpu/fp16 (79.9 MiB) and then wasm/fp32
- * (159.1 MiB). Each "recovery" attempt therefore downloaded a model up to four
- * times larger than the one that had just failed — 303 MiB in total before
- * giving up. Recovery must never cost more than the attempt it is recovering
- * from. Verified sizes from the repo tree:
- *   q8/model_quantized.onnx  43,102,531 B   <- used by every step
- *   fp16/model_fp16.onnx     83,812,437 B   <- never requested
- *   fp32/model.onnx         166,789,212 B   <- never requested
  */
 function deviceLadder() {
   const ladder = [
@@ -294,37 +329,49 @@ function deviceLadder() {
 
 function setModelLoading(text, pct) {
   modelFailed = false;
-  modelState.classList.remove("ready", "error");
-  modelText.textContent = text || "Loading AI model…";
-  modelPct.textContent = pct != null ? pct + "%" : "";
-  modelProgress.style.width = (pct != null ? pct : 0) + "%";
-  modelProgress.setAttribute("aria-valuenow", String(pct != null ? pct : 0));
+  if (modelState) modelState.classList.remove("ready", "error");
+  if (modelText) modelText.textContent = text || "Loading AI model…";
+  if (modelPct) modelPct.textContent = pct != null ? pct + "%" : "";
+  if (modelProgress) {
+    modelProgress.style.width = (pct != null ? pct : 0) + "%";
+    modelProgress.setAttribute("aria-valuenow", String(pct != null ? pct : 0));
+  }
   syncScanButton();
 }
 
 function setModelReady() {
   modelFailed = false;
-  modelState.classList.add("ready");
-  modelState.classList.remove("error");
-  modelText.textContent = modelBackend ? "AI model ready · " + modelBackend : "AI model ready";
-  modelPct.textContent = "";
-  modelProgress.style.width = "100%";
-  modelProgress.setAttribute("aria-valuenow", "100");
-  const old = modelState.querySelector(".model-retry");
-  if (old) old.remove();
+  if (modelState) {
+    modelState.classList.add("ready");
+    modelState.classList.remove("error");
+  }
+  if (modelText) modelText.textContent = modelBackend ? "AI model ready · " + modelBackend : "AI model ready";
+  if (modelPct) modelPct.textContent = "";
+  if (modelProgress) {
+    modelProgress.style.width = "100%";
+    modelProgress.setAttribute("aria-valuenow", "100");
+  }
+  if (modelState) {
+    const old = modelState.querySelector(".model-retry");
+    if (old) old.remove();
+  }
   syncScanButton();
 }
 
 function setModelError(msg) {
   modelFailed = true;
-  modelState.classList.add("error");
-  modelState.classList.remove("ready");
-  modelText.textContent = msg || "Could not load the AI model.";
-  modelPct.textContent = "";
-  modelProgress.style.width = "0%";
-  modelProgress.setAttribute("aria-valuenow", "0");
+  if (modelState) {
+    modelState.classList.add("error");
+    modelState.classList.remove("ready");
+  }
+  if (modelText) modelText.textContent = msg || "Could not load the AI model.";
+  if (modelPct) modelPct.textContent = "";
+  if (modelProgress) {
+    modelProgress.style.width = "0%";
+    modelProgress.setAttribute("aria-valuenow", "0");
+  }
 
-  if (!modelState.querySelector(".model-retry")) {
+  if (modelState && !modelState.querySelector(".model-retry")) {
     const row = modelState.querySelector(".model-row");
     const btn = document.createElement("button");
     btn.type = "button";
@@ -337,6 +384,36 @@ function setModelError(msg) {
   syncScanButton();
 }
 
+const TRANSFORMERS_FALLBACKS = [
+  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/+esm",
+  "https://esm.run/@huggingface/transformers@3.4.0",
+  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/dist/transformers.min.js",
+];
+
+async function importTransformersWithFallback() {
+  if (transformersMod) return transformersMod;
+  const urls = [TRANSFORMERS_URL, ...TRANSFORMERS_FALLBACKS.filter(u => u !== TRANSFORMERS_URL)];
+  let lastErr = null;
+  for (const url of urls) {
+    try {
+      let host = url;
+      try { host = new URL(url, location.href).hostname; } catch (_) { host = url; }
+      setModelLoading("Loading AI engine from " + host + "…", 0);
+      const mod = await import(url);
+      let resolved = null;
+      if (mod && typeof mod.pipeline === "function") resolved = mod;
+      else if (mod && mod.default && typeof mod.default.pipeline === "function") resolved = mod.default;
+      else throw new Error("pipeline not found in " + url);
+      transformersMod = resolved;
+      return resolved;
+    } catch (e) {
+      console.warn("Transformers import failed for", url, e);
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("All transformer CDN imports failed");
+}
+
 async function loadDetector(opts = {}) {
   if (detector && !opts.force) return detector;
   if (modelLoading) return null;
@@ -345,11 +422,19 @@ async function loadDetector(opts = {}) {
 
   try {
     setModelLoading("Loading AI engine…", 0);
-    const mod = await import(TRANSFORMERS_URL);
+    const mod = await importTransformersWithFallback();
     if (!mod || typeof mod.pipeline !== "function") throw new Error("Transformers.js did not expose a pipeline() function.");
     const pipeline = mod.pipeline;
     const env = mod.env;
-    if (env) env.allowLocalModels = false;
+    if (env) {
+      env.allowLocalModels = false;
+      // Enable browser cache so second visit is near-instant
+      if ("useBrowserCache" in env) env.useBrowserCache = true;
+      // Some builds need explicit wasm paths handling
+      if (env.backends && env.backends.onnx && env.backends.onnx.wasm) {
+        // Keep default wasmPaths, just toggle proxy per ladder step
+      }
+    }
 
     const errors = [];
     for (const step of deviceLadder()) {
@@ -406,14 +491,13 @@ async function loadDetector(opts = {}) {
 }
 
 /* ==================================================================
-   CLASSIFICATION PIPELINE (layers 2 → 5)
+   CLASSIFICATION PIPELINE (layers 2 → 5) — now handles multiple
+   detections ranked by disposal confidence + classification fallback
    ================================================================== */
 
 /**
  * Coerce a detection score to a 0–1 fraction.
- * transformers.js emits fractions by default but multiplies by 100 when a
- * caller passes `percentage: true`. Accept either rather than silently
- * clamping 91 down to 1 — that bug made every scan look 100% certain.
+ * Accepts both 0-1 and 0-100 ranges.
  */
 function normaliseScore(raw) {
   let s = Number(raw);
@@ -422,34 +506,28 @@ function normaliseScore(raw) {
   return Math.max(0, Math.min(1, s));
 }
 
-/** Layer 2+3+4+5 for a single detection. */
-function analyseDetection(det) {
-  const rawLabel = String((det && det.label) || "").toLowerCase().trim();
-  const detectionScore = normaliseScore(det && det.score);
+function boxAreaFraction(box) {
+  const norm = normalizeBoxToFraction(box);
+  if (!norm) return 0;
+  return Math.max(0, norm.w) * Math.max(0, norm.h);
+}
 
-  // Layer 2 — object recognition result → waste-relevant concept
-  if (!Object.prototype.hasOwnProperty.call(LABEL_TO_CONCEPT, rawLabel)) {
-    return {
-      rawLabel, detectionScore, concept: null, category: "none",
-      materialShare: 0, conditionRisk: 0, disposalScore: 0,
-      band: confidenceBand(0), alternatives: [],
-      reason: "unknown-label",
-    };
-  }
-
-  const conceptKey = LABEL_TO_CONCEPT[rawLabel];
+/**
+ * Core analysis for a concept key — shared by detection and classification.
+ */
+function analyseConceptKey(conceptKey, detectionScore, rawLabel, sourceType = "detection") {
   const concept = CONCEPTS[conceptKey];
   if (!concept) {
-    console.warn("Concept missing for label:", rawLabel, "→", conceptKey);
+    console.warn("Concept missing:", conceptKey, "←", rawLabel);
     return {
       rawLabel, detectionScore, concept: null, category: "none",
       materialShare: 0, conditionRisk: 0, disposalScore: 0,
       band: confidenceBand(0), alternatives: [],
       reason: "missing-concept",
+      sourceType,
     };
   }
 
-  // Layer 3 — aggregate materials by the category they lead to
   const totalWeight = concept.materials.reduce((s, m) => s + Math.max(0, m.weight || 0), 0) || 1;
   const byCategory = new Map();
   for (const m of concept.materials) {
@@ -457,9 +535,8 @@ function analyseDetection(det) {
     byCategory.set(m.category, (byCategory.get(m.category) || 0) + w);
   }
   const ranked = Array.from(byCategory.entries()).sort((a, b) => b[1] - a[1]);
-  const [topCategory, materialShare] = ranked[0];
+  const [topCategory, materialShare] = ranked[0] || ["none", 0];
 
-  // A concept whose most likely material is itself "uncertain" cannot yield a verdict.
   if (topCategory === "uncertain") {
     return {
       rawLabel, detectionScore, concept, category: "uncertain",
@@ -467,15 +544,14 @@ function analyseDetection(det) {
       band: confidenceBand(0),
       alternatives: ranked.filter(([c]) => c !== "uncertain").map(([c, w]) => ({ category: c, share: w })),
       reason: "material-ambiguous",
+      sourceType,
     };
   }
 
-  // Layer 5 — disposal confidence
   const conditionRisk = concept.conditionRisk || 0;
   const disposalScore = disposalConfidence(detectionScore, materialShare, conditionRisk);
   const band = confidenceBand(disposalScore);
 
-  // Layer 6 — verdict, or an explicit refusal to guess
   return {
     rawLabel, detectionScore, concept,
     category: band.key === "low" ? "uncertain" : topCategory,
@@ -483,56 +559,299 @@ function analyseDetection(det) {
     materialShare, conditionRisk, disposalScore, band,
     alternatives: ranked.slice(1).map(([category, share]) => ({ category, share })),
     reason: band.key === "low" ? "low-confidence" : "ok",
+    sourceType,
   };
+}
+
+/** Layer 2+3+4+5 for a single detection. */
+function analyseDetection(det) {
+  const rawLabel = String((det && det.label) || "").toLowerCase().trim();
+  const detectionScore = normaliseScore(det && det.score);
+
+  if (!Object.prototype.hasOwnProperty.call(LABEL_TO_CONCEPT, rawLabel)) {
+    return {
+      rawLabel, detectionScore, concept: null, category: "none",
+      materialShare: 0, conditionRisk: 0, disposalScore: 0,
+      band: confidenceBand(0), alternatives: [],
+      reason: "unknown-label",
+      sourceType: "detection",
+    };
+  }
+
+  const conceptKey = LABEL_TO_CONCEPT[rawLabel];
+  return analyseConceptKey(conceptKey, detectionScore, rawLabel, "detection");
+}
+
+/* ---------------- Classification fallback mapping ---------------- */
+
+const CLASSIFICATION_KEYWORDS = [
+  { keys: ["water bottle", "pop bottle", "beer bottle", "wine bottle", "bottle", "milk can", "pop can", "beer can", "tin can", "can", "beer glass", "red wine", "measuring cup"], concept: "bottle" },
+  { keys: ["book jacket", "book", "paperback"], concept: "book" },
+  { keys: ["banana", "apple", "orange", "broccoli", "carrot", "lemon", "strawberry", "pineapple", "mushroom", "bell pepper", "cucumber", "corn", "cauliflower", "zucchini", "artichoke", "custard apple", "pomegranate", "fig", "guacamole", "fruit", "vegetable", "granny smith"], concept: "food-fresh" },
+  { keys: ["pizza", "sandwich", "hot dog", "hamburger", "cheeseburger", "cake", "donut", "bagel", "pretzel", "burrito", "taco", "carbonara", "meat loaf", "potpie", "burrito"], concept: "food-prepared" },
+  { keys: ["wine glass", "goblet"], concept: "drinking-glass" },
+  { keys: ["cup", "mug", "espresso", "coffee mug", "cup"], concept: "cup-mug" },
+  { keys: ["bowl", "plate", "platter", "crockery", "mixing bowl", "soup bowl"], concept: "crockery" },
+  { keys: ["vase"], concept: "glass-decor" },
+  { keys: ["mirror"], concept: "mirror" },
+  { keys: ["window"], concept: "window-glass" },
+  { keys: ["fork", "knife", "spoon", "cutlery", "ladle", "spatula", "cleaver"], concept: "cutlery" },
+  { keys: ["cell phone", "mobile phone", "iphone", "smartphone", "cellphone", "phone"], concept: "phone" },
+  { keys: ["remote", "keyboard", "mouse", "joystick", "computer mouse"], concept: "electronics-small" },
+  { keys: ["laptop", "notebook", "tablet", "ipad"], concept: "electronics-portable" },
+  { keys: ["television", "monitor", "screen", "crt screen", "tv"], concept: "electronics-large" },
+  { keys: ["toaster", "blender", "hair dryer", "microwave", "oven", "refrigerator", "vacuum", "washer", "dryer", "coffee maker", "espresso maker", "frying pan", "wok", "dutch oven"], concept: "appliance-small" },
+  { keys: ["refrigerator", "fridge"], concept: "appliance-large" },
+  { keys: ["clock", "analog clock", "wall clock", "watch", "digital watch", "wristwatch"], concept: "battery-product" },
+  { keys: ["hat", "tie", "shoe", "handbag", "backpack", "suitcase", "clothing", "shirt", "jacket", "jeans", "sweater", "textile", "wool", "jean", "cardigan", "jersey"], concept: "textile" },
+  { keys: ["frisbee", "sports ball", "ball", "football", "basketball", "tennis ball", "golf ball", "soccer ball", "volleyball", "baseball", "rugby ball"], concept: "rigid-plastic-goods" },
+  { keys: ["toothbrush", "scissors", "eyeglasses", "sunglasses", "sunglass"], concept: "small-mixed-plastic" },
+  { keys: ["teddy bear", "teddy", "toy", "doll", "teddy bear", "jigsaw puzzle"], concept: "soft-toy" },
+  { keys: ["chair", "couch", "sofa", "bed", "desk", "table", "bench", "furniture", "bookcase", "filing cabinet"], concept: "furniture" },
+  { keys: ["door", "sink", "toilet", "bathtub", "shower curtain"], concept: "building-fixture" },
+  { keys: ["person", "people", "man", "woman", "child", "boy", "girl", "dog", "cat", "bird", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter"], concept: "not-waste" },
+  // Extra waste-relevant ImageNet labels
+  { keys: ["plastic bag", "shopping bag", "trash bag", "bin bag", "polythene"], concept: "mixed-goods" },
+  { keys: ["cardboard", "carton", "envelope", "packet", "mailbag"], concept: "book" },
+  { keys: ["aluminum foil", "tin foil", "foil"], concept: "bottle" },
+  { keys: ["candle", "lighter"], concept: "small-mixed-plastic" },
+  { keys: ["broom", "mop", "brush"], concept: "mixed-goods" },
+  { keys: ["bucket", "pail", "barrel"], concept: "bottle" },
+  { keys: ["ashcan", "trash can", "dustbin", "wastebin"], concept: "bulky-goods" },
+];
+
+function classificationLabelToConceptKey(label) {
+  const low = String(label || "").toLowerCase();
+  // Exact match first via LABEL_TO_CONCEPT (for COCO overlap)
+  if (Object.prototype.hasOwnProperty.call(LABEL_TO_CONCEPT, low)) return LABEL_TO_CONCEPT[low];
+  // Keyword substring match — longest keys first for specificity
+  const sorted = CLASSIFICATION_KEYWORDS.slice().sort((a, b) => Math.max(...b.keys.map(k => k.length)) - Math.max(...a.keys.map(k => k.length)));
+  for (const entry of sorted) {
+    for (const k of entry.keys) {
+      if (low.includes(k)) return entry.concept;
+    }
+  }
+  return null;
+}
+
+async function loadClassifier(opts = {}) {
+  if (classifier && !opts.force) return classifier;
+  if (classifierLoading) return null;
+  classifierLoading = true;
+  classifierFailed = false;
+
+  try {
+    const mod = await importTransformersWithFallback();
+    const pipeline = mod.pipeline;
+    const env = mod.env;
+    if (env) {
+      env.allowLocalModels = false;
+      if ("useBrowserCache" in env) env.useBrowserCache = true;
+    }
+
+    setModelLoading("Loading image classifier (~" + CLASSIFICATION_MODEL_MB + " MB) for fallback…", 10);
+    const errors = [];
+    for (const step of deviceLadder()) {
+      if (env && env.backends && env.backends.onnx && env.backends.onnx.wasm) {
+        env.backends.onnx.wasm.proxy = !!step.proxy;
+      }
+      try {
+        classifier = await pipeline("image-classification", CLASSIFICATION_MODEL_ID, {
+          ...step.opts,
+          progress_callback: (p) => {
+            if (!p) return;
+            if (p.status === "progress") {
+              const pct = Number.isFinite(p.progress) ? Math.round(p.progress) : 0;
+              setModelLoading("Downloading classifier " + (p.file || "") + " · " + step.label + "…", pct);
+            }
+          },
+        });
+        classifierBackend = step.label + (step.proxy ? " · threaded" : "");
+        // Do not call setModelReady — detector is still primary
+        return classifier;
+      } catch (e) {
+        console.warn("Classifier backend failed", step.label, e);
+        errors.push(String(e && e.message ? e.message : e));
+        classifier = null;
+      }
+    }
+    throw new Error(errors.join(" | "));
+  } catch (err) {
+    console.error("Classifier load failed", err);
+    classifier = null;
+    classifierFailed = true;
+    return null;
+  } finally {
+    classifierLoading = false;
+  }
+}
+
+async function tryClassificationFallback(frame) {
+  if (!frame) return null;
+  try {
+    const clf = classifier || await loadClassifier();
+    if (!clf) return null;
+
+    const results = await withTimeout(clf(frame, { topk: 5 }), 20000, "Classification timed out");
+    const list = Array.isArray(results) ? results : [results];
+
+    const candidates = [];
+    for (const r of list) {
+      const score = normaliseScore(r.score);
+      if (score < CLASSIFICATION_THRESHOLD) continue;
+      const conceptKey = classificationLabelToConceptKey(r.label);
+      if (!conceptKey) continue;
+      const analysis = analyseConceptKey(conceptKey, score, String(r.label || "").toLowerCase(), "classification");
+      if (!analysis) continue;
+      if (analysis.category === "none") continue;
+      // Boost if disposalScore decent
+      candidates.push({ result: r, analysis, score });
+    }
+
+    if (!candidates.length) return null;
+
+    // Rank by disposalScore, then raw score
+    candidates.sort((a, b) => {
+      if (b.analysis.disposalScore !== a.analysis.disposalScore) return b.analysis.disposalScore - a.analysis.disposalScore;
+      return b.score - a.score;
+    });
+
+    const best = candidates[0].analysis;
+    // Only return if at least partly confident or material not ambiguous
+    if (best.category === "none") return null;
+    // If uncertain but classification is our only hope, still return it — UI will show uncertain
+    return best;
+  } catch (err) {
+    console.warn("Classification fallback failed", err);
+    return null;
+  }
 }
 
 /* ==================================================================
    SCAN FLOW
    ================================================================== */
 function syncScanButton() {
-  const ready = camState === "live" && !scanning;
-  scanButton.disabled = !ready;
-  const span = scanButton.querySelector("span");
+  // FIX: previously disabled for paused/off, so after tab hidden the button
+  // said \"Press Scan Item to restart\" but was disabled — scanner looked broken.
+  const canScan = (camState === "live" || camState === "paused" || camState === "off") && !scanning;
+  if (scanButton) scanButton.disabled = !canScan;
+  const span = scanButton ? scanButton.querySelector("span") : null;
   if (span) {
     span.textContent = scanning ? "Scanning…"
       : (camState === "live" && !detector) ? "Load model & scan"
+      : (camState === "paused" || camState === "off") ? "Restart camera & scan"
       : "Scan Item";
   }
-  // Offer the download as a deliberate choice rather than a surprise mid-scan.
-  if (modelPreload) modelPreload.hidden = !!detector || modelLoading || modelFailed;
+  // FIX: previously hidden when modelFailed, which hid the preload button
+  // exactly when user needed it. Keep it visible unless loading or ready.
+  if (modelPreload) modelPreload.hidden = !!detector || modelLoading;
 }
 
 function captureFrame() {
-  const vw = video.videoWidth || 640;
-  const vh = video.videoHeight || 480;
-  const scale = Math.min(1, 640 / vw);
-  captureCanvas.width = Math.max(1, Math.round(vw * scale));
-  captureCanvas.height = Math.max(1, Math.round(vh * scale));
-  captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-  return captureCanvas.toDataURL("image/jpeg", 0.85);
+  // Use video dimensions if available, else fallback to last known or 640x480
+  const vw = (video && video.videoWidth) ? video.videoWidth : lastCaptureW;
+  const vh = (video && video.videoHeight) ? video.videoHeight : lastCaptureH;
+  const safeW = Math.max(1, vw || 640);
+  const safeH = Math.max(1, vh || 480);
+  const scale = Math.min(1, 640 / safeW);
+  const cw = Math.max(1, Math.round(safeW * scale));
+  const ch = Math.max(1, Math.round(safeH * scale));
+  if (captureCanvas) {
+    captureCanvas.width = cw;
+    captureCanvas.height = ch;
+    if (captureCtx && video) {
+      try {
+        captureCtx.drawImage(video, 0, 0, cw, ch);
+      } catch (e) {
+        console.warn("captureFrame drawImage failed", e);
+      }
+    }
+  }
+  lastCaptureW = cw;
+  lastCaptureH = ch;
+  // Prefer returning the canvas itself for transformers.js (it accepts canvas)
+  // but keep dataURL fallback for compatibility.
+  // The detector can handle HTMLCanvasElement directly, which avoids base64 cost.
+  if (captureCanvas) return captureCanvas;
+  return "";
 }
 
 function clearOverlay() {
   if (!overlayCtx || !overlayCanvas) return;
-  overlayCanvas.width = overlayCanvas.clientWidth || 1;
-  overlayCanvas.height = overlayCanvas.clientHeight || 1;
-  overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  // Use devicePixelRatio for crisp boxes
+  const dpr = window.devicePixelRatio || 1;
+  const w = overlayCanvas.clientWidth || 1;
+  const h = overlayCanvas.clientHeight || 1;
+  overlayCanvas.width = Math.round(w * dpr);
+  overlayCanvas.height = Math.round(h * dpr);
+  overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  overlayCtx.clearRect(0, 0, w, h);
+}
+
+function normalizeBoxToFraction(box) {
+  if (!box) return null;
+  // Test format: {x, y, width, height} where values may be 0-100 percentages
+  if ("x" in box && "width" in box) {
+    let x = Number(box.x) || 0;
+    let y = Number(box.y) || 0;
+    let w = Number(box.width) || 0;
+    let h = Number(box.height) || 0;
+    // Detect if percentages 0-100
+    if (x > 1 || y > 1 || w > 1 || h > 1) {
+      x /= 100; y /= 100; w /= 100; h /= 100;
+    }
+    return { x, y, w, h };
+  }
+  // Real transformers.js format: {xmin, ymin, xmax, ymax}
+  if ("xmin" in box && "xmax" in box) {
+    let xmin = Number(box.xmin) || 0;
+    let ymin = Number(box.ymin) || 0;
+    let xmax = Number(box.xmax) || 0;
+    let ymax = Number(box.ymax) || 0;
+    // If values are normalized 0-1, use directly
+    if (xmax <= 1.01 && ymax <= 1.01 && xmin >= 0 && ymin >= 0 && xmax > xmin && ymax > ymin) {
+      return { x: xmin, y: ymin, w: xmax - xmin, h: ymax - ymin };
+    }
+    // Pixel coordinates: normalize by last capture size
+    const iw = lastCaptureW || 640;
+    const ih = lastCaptureH || 480;
+    // Clamp to avoid negative or huge boxes
+    xmin = Math.max(0, Math.min(iw, xmin));
+    ymin = Math.max(0, Math.min(ih, ymin));
+    xmax = Math.max(0, Math.min(iw, xmax));
+    ymax = Math.max(0, Math.min(ih, ymax));
+    return {
+      x: xmin / iw,
+      y: ymin / ih,
+      w: Math.max(0, (xmax - xmin) / iw),
+      h: Math.max(0, (ymax - ymin) / ih),
+    };
+  }
+  return null;
 }
 
 function drawDetections(dets) {
   if (!overlayCtx || !overlayCanvas) return;
+  const dpr = window.devicePixelRatio || 1;
   const w = overlayCanvas.clientWidth || 1;
   const h = overlayCanvas.clientHeight || 1;
-  overlayCanvas.width = w;
-  overlayCanvas.height = h;
+  // Ensure canvas size matches display size * dpr
+  if (overlayCanvas.width !== Math.round(w * dpr) || overlayCanvas.height !== Math.round(h * dpr)) {
+    overlayCanvas.width = Math.round(w * dpr);
+    overlayCanvas.height = Math.round(h * dpr);
+  }
+  overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   overlayCtx.clearRect(0, 0, w, h);
 
   dets.forEach((d, i) => {
-    const b = d.box || {};
-    const x = ((b.x || 0) / 100) * w;
-    const y = ((b.y || 0) / 100) * h;
-    const bw = ((b.width || 0) / 100) * w;
-    const bh = ((b.height || 0) / 100) * h;
+    const norm = normalizeBoxToFraction(d.box);
+    if (!norm) return;
+    const x = norm.x * w;
+    const y = norm.y * h;
+    const bw = norm.w * w;
+    const bh = norm.h * h;
+    // Skip tiny boxes that are likely noise
+    if (bw < 2 || bh < 2) return;
     const top = i === 0;
     overlayCtx.lineWidth = top ? 3 : 2;
     overlayCtx.strokeStyle = top ? "#ffd23e" : "rgba(255,255,255,.75)";
@@ -561,17 +880,23 @@ async function runScan() {
   if (scanning) return;
 
   if (camState !== "live") {
-    if (camState === "error" || camState === "paused" || camState === "off") {
-      const started = await ensureCamera();
-      if (!started) {
+    const started = await ensureCamera();
+    if (!started || camState !== "live") {
+      if (camState === "starting") {
+        renderNoVerdict({
+          title: "CAMERA STARTING",
+          meta: "Please wait a moment",
+          body: "The camera is still starting. Wait a second and press Scan again — or use the manual lookup below.",
+        });
+      } else {
         renderNoVerdict({
           title: "CAMERA NOT AVAILABLE",
           meta: "Scan cancelled",
           body: "The scanner needs the camera to identify an item. Use the manual lookup below to find the right bin instead.",
         });
       }
+      return;
     }
-    return;
   }
 
   if (!detector) {
@@ -587,17 +912,13 @@ async function runScan() {
   }
 
   scanning = true;
-  cameraBox.classList.add("scanning");
+  if (cameraBox) cameraBox.classList.add("scanning");
   syncScanButton();
 
   try {
     const frame = captureFrame();
-    // NOTE: no `percentage: true`. That option multiplies every score by 100,
-    // which silently collapsed the whole confidence model — analyseDetection
-    // clamps to [0,1], so a 0.91 detection became 1.0 and every scan looked
-    // maximally certain. Scores are fractions here.
     const outputs = await withTimeout(detector(frame, { threshold: SCAN_THRESHOLD }), SCAN_TIMEOUT_MS, "Inference timed out");
-    handleDetections(outputs);
+    await handleDetections(outputs, frame);
   } catch (err) {
     console.error("Scan failed:", err);
     clearOverlay();
@@ -608,41 +929,115 @@ async function runScan() {
     });
   } finally {
     scanning = false;
-    cameraBox.classList.remove("scanning");
+    if (cameraBox) cameraBox.classList.remove("scanning");
     syncScanButton();
   }
 }
 
-function handleDetections(outputs) {
+/**
+ * New multi-object pipeline:
+ * - Analyses ALL detections above threshold, not just top score
+ * - Ranks by disposal confidence (not just detection confidence)
+ * - Falls back to image classification when DETR is empty/unknown
+ * - Handles material ambiguity by surfacing alternatives
+ */
+async function handleDetections(outputs, frame) {
   const list = Array.isArray(outputs) ? outputs.slice() : [];
 
-  if (!list.length) {
+  // Always draw what we have, even if empty (clears)
+  if (list.length) {
+    // Sort initially by detection score for drawing order (top = highest)
+    list.sort((a, b) => (b.score || 0) - (a.score || 0));
+    drawDetections(list);
+  } else {
     clearOverlay();
+  }
+
+  // Analyse every detection into disposal terms
+  const analysed = list.map((det) => {
+    const analysis = analyseDetection(det);
+    const area = boxAreaFraction(det.box);
+    return { det, analysis, area, score: det.score || 0 };
+  });
+
+  // Filter out truly unknown labels for primary ranking, but keep them for "also"
+  const known = analysed.filter(x => x.analysis && x.analysis.category !== "none");
+  const unknown = analysed.filter(x => !x.analysis || x.analysis.category === "none");
+
+  // Rank known by: disposalScore desc, then detectionScore desc, then box area desc
+  known.sort((a, b) => {
+    if (b.analysis.disposalScore !== a.analysis.disposalScore) return b.analysis.disposalScore - a.analysis.disposalScore;
+    if (b.analysis.detectionScore !== a.analysis.detectionScore) return b.analysis.detectionScore - a.analysis.detectionScore;
+    if (b.area !== a.area) return b.area - a.area;
+    return b.score - a.score;
+  });
+
+  const others = analysed.slice(0, 6).map(x => {
+    const label = String(x.det.label || x.analysis.rawLabel || "unknown").toLowerCase();
+    const pct = Math.round((x.analysis.detectionScore || x.score || 0) * 100);
+    const cat = x.analysis.confidentCategory || x.analysis.category;
+    const catShort = (CATEGORIES[cat] && CATEGORIES[cat].short) ? " → " + CATEGORIES[cat].short : "";
+    return label + " " + pct + "%" + catShort;
+  }).filter((_, i) => i > 0).slice(0, 4);
+
+  // Case 1: nothing detected at all — try classification fallback
+  if (!list.length) {
+    const fallback = await tryClassificationFallback(frame);
+    if (fallback) {
+      // Show fallback as primary
+      renderScanResult(fallback, others);
+      return;
+    }
     renderNoVerdict({
       title: "NO OBJECT DETECTED",
       meta: "Nothing above " + Math.round(SCAN_THRESHOLD * 100) + "% detection confidence",
-      body: "The scanner could not confidently identify anything in that frame. Move closer so the item fills the frame, improve the lighting, and scan again — or use the manual lookup below.",
+      body: "The scanner could not confidently identify anything in that frame. Move closer so the item fills the frame, improve the lighting, and scan again — or use the manual lookup below. The app also tried a secondary image classifier (~" + CLASSIFICATION_MODEL_MB + " MB) and found nothing recognisable.",
     });
     return;
   }
 
-  list.sort((a, b) => (b.score || 0) - (a.score || 0));
-  drawDetections(list);
-
-  const analysis = analyseDetection(list[0]);
-  const others = list.slice(1, 4).map((d) => String(d.label || "").toLowerCase() + " " + Math.round((d.score || 0) * 100) + "%");
-
-  if (analysis.category === "none") {
+  // Case 2: all detections are unknown labels
+  if (!known.length) {
+    const fallback = await tryClassificationFallback(frame);
+    if (fallback) {
+      renderScanResult(fallback, others);
+      return;
+    }
+    const firstUnknown = analysed[0] ? analysed[0].analysis : { rawLabel: "unknown", detectionScore: 0 };
     renderNoVerdict({
       title: "ITEM NOT RECOGNISED",
-      meta: "Detected: " + esc(analysis.rawLabel || "unknown") + " · " + Math.round(analysis.detectionScore * 100) + "% detection confidence",
-      body: "The scanner found something but has no South Australian disposal rule for it. Check the manual lookup below or the official Which Bin guide rather than guessing.",
+      meta: "Detected: " + esc(firstUnknown.rawLabel || "unknown") + " · " + Math.round((firstUnknown.detectionScore || 0) * 100) + "% detection confidence",
+      body: "The scanner found something but has no South Australian disposal rule for it. It also tried a secondary classifier that knows ~1000 everyday objects and still could not map it to a bin. Check the manual lookup below or the official Which Bin guide rather than guessing.",
       also: others,
     });
     return;
   }
 
-  renderScanResult(analysis, others);
+  // Case 3: we have at least one known concept — pick best by disposalScore
+  const best = known[0];
+
+  // If best is uncertain/low-confidence, see if classification can do better
+  if (best.analysis.category === "uncertain" || best.analysis.disposalScore < 0.5) {
+    const fallback = await tryClassificationFallback(frame);
+    if (fallback && fallback.disposalScore > best.analysis.disposalScore && fallback.category !== "uncertain" && fallback.category !== "none") {
+      // Prefer confident classification over uncertain detection
+      const combinedOthers = [best.analysis.rawLabel + " " + Math.round(best.analysis.detectionScore * 100) + "% → " + (CATEGORIES[best.analysis.confidentCategory]?.short || best.analysis.category), ...others].slice(0, 4);
+      renderScanResult(fallback, combinedOthers);
+      return;
+    }
+  }
+
+  // If best is not-waste (person, animal, vehicle), but there is a waste item also present, prefer waste
+  if (best.analysis.category === "notwaste") {
+    const wasteCandidate = known.find(x => x.analysis.category !== "notwaste" && x.analysis.category !== "none");
+    if (wasteCandidate) {
+      renderScanResult(wasteCandidate.analysis, others);
+      return;
+    }
+  }
+
+  // Normal confident path
+  renderScanResult(best.analysis, others);
 }
 
 /* ==================================================================
@@ -656,26 +1051,27 @@ function sourceLine(srcKey) {
 
 /** A neutral card that never names a bin. Used for every failure mode. */
 function renderNoVerdict({ title, meta, body, also }) {
-  resultEmpty.hidden = true;
-  resultContent.hidden = false;
-  resultContent.innerHTML =
-    '<div class="result-card" data-category="none">' +
-      '<div class="cat-flag">' + icon("question", 16) + " No bin recommendation</div>" +
-      '<div class="cat-title">' + esc(title) + "</div>" +
-      '<div class="cat-meta">' + esc(meta || "") + "</div>" +
-      (body ? '<div class="cat-why"><p>' + esc(body) + "</p></div>" : "") +
-      (also && also.length ? '<div class="cat-also">Also in frame: ' + esc(also.join(" · ")) + "</div>" : "") +
-      '<div class="cat-actions">' +
-        '<button class="btn" type="button" data-action="scan-again">' + icon("scan", 18) + " Scan again</button>" +
-        '<button class="btn" type="button" data-action="go-manual">' + icon("book", 18) + " Check manually</button>" +
-      "</div>" +
-    "</div>";
-  wireResultActions();
+  if (resultEmpty) resultEmpty.hidden = true;
+  if (resultContent) {
+    resultContent.hidden = false;
+    resultContent.innerHTML =
+      '<div class="result-card" data-category="none">' +
+        '<div class="cat-flag">' + icon("question", 16) + " No bin recommendation</div>" +
+        '<div class="cat-title">' + esc(title) + "</div>" +
+        '<div class="cat-meta">' + esc(meta || "") + "</div>" +
+        (body ? '<div class="cat-why"><p>' + esc(body) + "</p></div>" : "") +
+        (also && also.length ? '<div class="cat-also">Also in frame: ' + esc(also.join(" · ")) + "</div>" : "") +
+        '<div class="cat-actions">' +
+          '<button class="btn" type="button" data-action="scan-again">' + icon("scan", 18) + " Scan again</button>" +
+          '<button class="btn" type="button" data-action="go-manual">' + icon("book", 18) + " Check manually</button>" +
+        "</div>" +
+      "</div>";
+    wireResultActions();
+  }
 }
 
 function renderScanResult(a, others) {
   const cat = CATEGORIES[a.category];
-  const isVerdict = !!cat.bin;
   const pctDet = Math.round(a.detectionScore * 100);
   const pctDis = Math.round(a.disposalScore * 100);
 
@@ -738,17 +1134,19 @@ function renderScanResult(a, others) {
         : "");
   }
 
-  resultEmpty.hidden = true;
-  resultContent.hidden = false;
-  resultContent.innerHTML =
-    '<div class="result-card" data-category="' + esc(a.category) + '">' + inner +
-      '<div class="cat-actions">' +
-        '<button class="btn" type="button" data-action="scan-again">' + icon("scan", 18) + " Scan again</button>" +
-        '<button class="btn" type="button" data-action="go-manual">' + icon("book", 18) + " Check manually</button>" +
-        '<button class="btn" type="button" data-action="clear-result">Clear</button>' +
-      "</div>" +
-    "</div>";
-  wireResultActions();
+  if (resultEmpty) resultEmpty.hidden = true;
+  if (resultContent) {
+    resultContent.hidden = false;
+    resultContent.innerHTML =
+      '<div class="result-card" data-category="' + esc(a.category) + '">' + inner +
+        '<div class="cat-actions">' +
+          '<button class="btn" type="button" data-action="scan-again">' + icon("scan", 18) + " Scan again</button>" +
+          '<button class="btn" type="button" data-action="go-manual">' + icon("book", 18) + " Check manually</button>" +
+          '<button class="btn" type="button" data-action="clear-result">Clear</button>' +
+        "</div>" +
+      "</div>";
+    wireResultActions();
+  }
 }
 
 function confidenceBar(a) {
@@ -762,6 +1160,7 @@ function confidenceBar(a) {
 }
 
 function wireResultActions() {
+  if (!resultContent) return;
   const again = resultContent.querySelector('[data-action="scan-again"]');
   const clear = resultContent.querySelector('[data-action="clear-result"]');
   const manual = resultContent.querySelector('[data-action="go-manual"]');
@@ -778,9 +1177,11 @@ function wireResultActions() {
 }
 
 function clearResult() {
-  resultContent.hidden = true;
-  resultContent.innerHTML = "";
-  resultEmpty.hidden = false;
+  if (resultContent) {
+    resultContent.hidden = true;
+    resultContent.innerHTML = "";
+  }
+  if (resultEmpty) resultEmpty.hidden = false;
   clearOverlay();
 }
 
@@ -789,6 +1190,7 @@ function clearResult() {
    ================================================================== */
 function buildItemGrid() {
   const grid = $("#item-grid");
+  if (!grid) return;
   grid.innerHTML = ITEMS.map((i) =>
     '<button class="item-tile" data-id="' + esc(i.id) + '" type="button" aria-label="' +
         esc(i.name) + " — goes in the " + esc(BINS[i.bin].name) + " (" + esc(BINS[i.bin].sub) + ')">' +
@@ -810,26 +1212,28 @@ function showManualItem(id) {
   const cat = CATEGORIES[category];
   const bin = BINS[item.bin];
 
-  resultEmpty.hidden = true;
-  resultContent.hidden = false;
-  resultContent.innerHTML =
-    '<div class="result-card" data-category="' + esc(category) + '">' +
-      '<div class="cat-flag is-ok">' + icon("check", 16) + " Confirmed from official guidance</div>" +
-      '<div class="cat-title">' + esc(cat.title) + "</div>" +
-      '<div class="cat-meta">Manual lookup: ' + esc(item.name) + "</div>" +
-      '<div class="cat-steps">' +
-        '<div class="step"><span class="step-k">What</span><span class="step-v">' + esc(item.name) + "</span></div>" +
-        '<div class="step"><span class="step-k">Where</span><span class="step-v"><strong>' + esc(bin.name) + "</strong> — " + esc(bin.sub) + "</span></div>" +
-        '<div class="step"><span class="step-k">Why</span><span class="step-v">' + esc(item.why) + "</span></div>" +
-        '<div class="step"><span class="step-k">Science</span><span class="step-v">' + esc(item.science) + "</span></div>" +
-      "</div>" +
-      (item.varies ? '<div class="cat-note">' + esc(item.varies) + "</div>" : "") +
-      sourceLine(item.src) +
-      '<div class="cat-actions">' +
-        '<button class="btn" type="button" data-action="clear-result">Clear</button>' +
-      "</div>" +
-    "</div>";
-  wireResultActions();
+  if (resultEmpty) resultEmpty.hidden = true;
+  if (resultContent) {
+    resultContent.hidden = false;
+    resultContent.innerHTML =
+      '<div class="result-card" data-category="' + esc(category) + '">' +
+        '<div class="cat-flag is-ok">' + icon("check", 16) + " Confirmed from official guidance</div>" +
+        '<div class="cat-title">' + esc(cat.title) + "</div>" +
+        '<div class="cat-meta">Manual lookup: ' + esc(item.name) + "</div>" +
+        '<div class="cat-steps">' +
+          '<div class="step"><span class="step-k">What</span><span class="step-v">' + esc(item.name) + "</span></div>" +
+          '<div class="step"><span class="step-k">Where</span><span class="step-v"><strong>' + esc(bin.name) + "</strong> — " + esc(bin.sub) + "</span></div>" +
+          '<div class="step"><span class="step-k">Why</span><span class="step-v">' + esc(item.why) + "</span></div>" +
+          '<div class="step"><span class="step-k">Science</span><span class="step-v">' + esc(item.science) + "</span></div>" +
+        "</div>" +
+        (item.varies ? '<div class="cat-note">' + esc(item.varies) + "</div>" : "") +
+        sourceLine(item.src) +
+        '<div class="cat-actions">' +
+          '<button class="btn" type="button" data-action="clear-result">Clear</button>' +
+        "</div>" +
+      "</div>";
+    wireResultActions();
+  }
   const panel = $("#result-panel");
   if (panel) panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -839,6 +1243,7 @@ function showManualItem(id) {
    ================================================================== */
 function buildLegend() {
   const legend = $("#bin-legend");
+  if (!legend) return;
   const data = [
     { bin: BINS.green, items: ["Food scraps & bones", "Garden prunings", "Tissues & paper towel", "Certified compostables"] },
     { bin: BINS.yellow, items: ["Glass bottles & jars", "Cans & clean tins", "Rigid plastic containers", "Paper & cardboard"] },
@@ -924,6 +1329,7 @@ function shuffle(arr) {
 
 function buildBins() {
   const binsWrap = $("#game-bins");
+  if (!binsWrap) return;
   const household = ["green", "yellow", "blue"];
   binsWrap.innerHTML = household.map((k) =>
     '<div class="g-bin" data-bin="' + k + '" role="button" tabindex="0" aria-label="Sort into ' + esc(BINS[k].name) + ", " + esc(BINS[k].sub) + '">' +
@@ -973,7 +1379,7 @@ function renderRound() {
   wrap.dataset.items = JSON.stringify(gamePool.map((i) => i.id));
   wrap.innerHTML = gamePool.map((i) =>
     '<div class="g-item" draggable="true" data-id="' + esc(i.id) + '" role="button" tabindex="0" ' +
-      'aria-label="' + esc(i.name) + '. Select then choose a bin.">' +
+      'aria-label="' + esc(i.name) + '. Select then choose a bin.\">' +
       icon(i.icon, 26) +
       '<span class="g-name">' + esc(i.name) + "</span>" +
     "</div>"
@@ -1256,7 +1662,7 @@ function downloadFeedback() {
 /* ==================================================================
    WIRE UP
    ================================================================== */
-scanButton.addEventListener("click", runScan);
+if (scanButton) scanButton.addEventListener("click", runScan);
 $$('[data-action="restart"]').forEach((b) => b.addEventListener("click", startGame));
 
 document.addEventListener("visibilitychange", () => {
@@ -1265,7 +1671,6 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => stopStream());
 
 window.addEventListener("resize", () => {
-  // Keep overlay boxes aligned with the video box after a layout change.
   if (camState !== "live") clearOverlay();
 });
 
@@ -1306,7 +1711,7 @@ init();
 
 
 /* ---- appended by tests/build.mjs — not part of the shipped app.js ---- */
-export { icon, activateTab, setCamState, cameraStatusError, startCamera, stopStream, stopCamera, ensureCamera, deviceLadder, setModelLoading, setModelReady, setModelError, loadDetector, normaliseScore, analyseDetection, syncScanButton, captureFrame, clearOverlay, drawDetections, withTimeout, runScan, handleDetections, sourceLine, renderNoVerdict, renderScanResult, confidenceBar, wireResultActions, clearResult, buildItemGrid, showManualItem, buildLegend, buildScience, shuffle, buildBins, startGame, renderRound, selectGameItem, submitSort, flash, showTeaching, finishGame, buildReferences, loadFeedback, saveFeedback, renderFeedbackList, initFeedbackForm, setFeedbackStatus, downloadFeedback, init, ICONS, esc, FEEDBACK_KEY, $, $$, video, captureCanvas, captureCtx, overlayCanvas, overlayCtx, cameraBox, camDot, camStatus, cameraState, modelState, modelText, modelPct, modelProgress, scanButton, modelPreload, modelNote, resultEmpty, resultContent, SCAN_THRESHOLD, SCAN_TIMEOUT_MS, TRANSFORMERS_URL, MODEL_ID, MODEL_BYTES, MODEL_MB, WASM_BYTES, FIRST_RUN_MB };
+export { icon, activateTab, setCamState, cameraStatusError, startCamera, stopStream, stopCamera, ensureCamera, deviceLadder, setModelLoading, setModelReady, setModelError, importTransformersWithFallback, loadDetector, normaliseScore, boxAreaFraction, analyseConceptKey, analyseDetection, classificationLabelToConceptKey, loadClassifier, tryClassificationFallback, syncScanButton, captureFrame, clearOverlay, normalizeBoxToFraction, drawDetections, withTimeout, runScan, handleDetections, sourceLine, renderNoVerdict, renderScanResult, confidenceBar, wireResultActions, clearResult, buildItemGrid, showManualItem, buildLegend, buildScience, shuffle, buildBins, startGame, renderRound, selectGameItem, submitSort, flash, showTeaching, finishGame, buildReferences, loadFeedback, saveFeedback, renderFeedbackList, initFeedbackForm, setFeedbackStatus, downloadFeedback, init, ICONS, esc, FEEDBACK_KEY, $, $$, video, captureCanvas, captureCtx, overlayCanvas, overlayCtx, cameraBox, camDot, camStatus, cameraState, modelState, modelText, modelPct, modelProgress, scanButton, modelPreload, modelNote, resultEmpty, resultContent, SCAN_THRESHOLD, SCAN_TIMEOUT_MS, TRANSFORMERS_URL, MODEL_ID, MODEL_BYTES, MODEL_MB, WASM_BYTES, FIRST_RUN_MB, CLASSIFICATION_MODEL_ID, CLASSIFICATION_THRESHOLD, CLASSIFICATION_MODEL_MB, TRANSFORMERS_FALLBACKS, CLASSIFICATION_KEYWORDS };
 export const __state = () => ({ camState, detector, modelLoading, modelFailed, modelBackend, scanning, gameScore, answered, selectedItem, gamePool });
 export const __set = (o) => {
   if ("camState" in o) camState = o.camState;
