@@ -53,6 +53,35 @@ when the model crashes, and when a label is not recognised.
 | `ort-wasm-simd-threaded.jsep.wasm` (ONNX Runtime) | 22.8 MiB |
 | `transformers.web.min.js` | 0.4 MiB |
 
+### Entry point
+
+The scanner imports Transformers.js from a **`+esm` CDN bundle**:
+
+```js
+https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/+esm
+```
+
+The plain `dist/transformers.web.min.js` file in the same package is *not* usable in a
+browser. Its first line is
+
+```js
+import*as e from"onnxruntime-common";import*as t from"onnxruntime-web";
+```
+
+Those are bare module specifiers. A browser resolves them relative to the importing
+script, requests `…/dist/onnxruntime-common`, receives a 404, and the dynamic `import()`
+rejects before a single line of the library executes. That file is a bundler
+intermediate. The `+esm` endpoints are pre-bundled with every specifier rewritten to a
+root-relative URL, and `esm.sh` is configured as a second CDN in case jsDelivr is
+unreachable.
+
+### Scanning without a camera
+
+`getUserMedia` throws a `SecurityError` inside a sandboxed or cross-origin iframe that
+lacks an `allow="camera"` permission policy — before the user is ever prompted. The
+**Use a photo instead of the camera** button runs the identical model and the identical
+analysis on a chosen image, so the scanner still works in those environments.
+
 Nothing is fetched until you choose to download it — either with the
 **Download the AI model now** button or by pressing *Scan Item*. First visit is about
 **64 MB**; the browser caches all of it, so later visits are near-instant. Visitors who
@@ -145,10 +174,17 @@ stubbed ONNX runtime and a switchable `getUserMedia`.
 cd tests && npm install && npm test
 ```
 
-It runs **129 assertions** covering label coverage, the confidence model,
+It runs **145 assertions** covering label coverage, the confidence model,
 uncertain-result handling, SA rule correctness, manual lookup, references, the game,
 every camera failure mode, model-failure recovery, the download ladder, the feedback
-form, the report page structure, navigation and accessibility attributes.
+form, the report page structure, the photo fallback, navigation and accessibility attributes.
+
+Three of those assertions exist because of bugs the suite itself had been hiding: the CDN
+entry point must be a pre-bundled browser ESM bundle (not a `dist/*.min.js` file with
+bare specifiers), the detector must never be called with `percentage: true`, and
+detection boxes must render with non-zero size from the pipeline's real
+`{xmin, ymin, xmax, ymax}` shape. The earlier canvas stub recorded nothing, so a box
+drawn at `0,0` with zero width and height passed as a box.
 
 `tests/build.mjs` regenerates `tests/app-under-test.mjs` from `../app.js` on every run
 and fails if an expected function is missing, so the tests cannot silently drift away

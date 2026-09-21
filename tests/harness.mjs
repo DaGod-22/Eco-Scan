@@ -26,18 +26,24 @@ export const env = {
   lastConstraints: null,
 };
 
+/* ---------------------------------------- records what the app actually draws */
+export const drawn = { strokeRect: [], fillRect: [], fillText: [] };
+
 /* ------------------------------------------------------- canvas (2d) stub */
 const makeCtx = (canvas) => ({
   canvas,
   globalAlpha: 1, globalCompositeOperation: "source-over",
   fillStyle: "#000", strokeStyle: "#000", lineWidth: 1, font: "10px sans-serif",
   textAlign: "start", textBaseline: "alphabetic", lineDashOffset: 0,
-  drawImage() {}, fillRect() {}, clearRect() {}, strokeRect() {},
+  drawImage() {},
+  fillRect(x, y, w, h) { drawn.fillRect.push({ x, y, w, h }); },
+  clearRect() {},
+  strokeRect(x, y, w, h) { drawn.strokeRect.push({ x, y, w, h }); },
   beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, arc() {}, rect() {},
   stroke() {}, fill() {}, save() {}, restore() {},
   setTransform() {}, transform() {}, translate() {}, scale() {}, rotate() {},
   setLineDash() {}, getLineDash: () => [],
-  fillText() {}, strokeText() {},
+  fillText(t, x, y) { drawn.fillText.push({ t, x, y }); }, strokeText() {},
   measureText: (t) => ({ width: String(t).length * 6 }),
   createLinearGradient: () => ({ addColorStop() {} }),
   createPattern: () => null,
@@ -112,7 +118,8 @@ Object.defineProperty(globalThis, "navigator", { value: window.navigator, config
 for (const k of ["window", "document", "localStorage", "sessionStorage", "location", "history",
   "HTMLElement", "HTMLVideoElement", "HTMLCanvasElement", "Element", "Node", "Event",
   "CustomEvent", "KeyboardEvent", "MouseEvent", "DragEvent", "Blob", "FormData",
-  "getComputedStyle", "requestAnimationFrame", "cancelAnimationFrame", "Image", "DOMParser"]) {
+  "getComputedStyle", "requestAnimationFrame", "cancelAnimationFrame", "Image", "DOMParser",
+  "FileReader", "File", "FileList", "DataTransfer", "atob", "btoa"]) {
   if (window[k] !== undefined) {
     try { Object.defineProperty(globalThis, k, { value: window[k], configurable: true, writable: true }); }
     catch (err) { globalThis[k] = window[k]; }

@@ -19,10 +19,10 @@ let out = src;
 
 const beforeUrl = out;
 out = out.replace(
-  /const TRANSFORMERS_URL = "https:[^"]+";/,
-  'const TRANSFORMERS_URL = "./stub-transformers.mjs";',
+  /const TRANSFORMERS_URLS = \[[\s\S]*?\];/,
+  'const TRANSFORMERS_URLS = ["./stub-transformers.mjs"];',
 );
-if (out === beforeUrl) throw new Error("build: TRANSFORMERS_URL anchor not found in app.js");
+if (out === beforeUrl) throw new Error("build: TRANSFORMERS_URLS anchor not found in app.js");
 
 const beforeData = out;
 out = out.replace('} from "./data.js";', '} from "../data.js";');

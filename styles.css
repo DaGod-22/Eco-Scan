@@ -1076,3 +1076,14 @@ code { font-size: .84em; background: rgba(26,26,26,.07); padding: 1px 4px; borde
 @media (min-width: 720px) and (min-height: 480px) {
   .report-linked { grid-column: 1 / -1; }
 }
+
+/* v2.3 — scan from a chosen photo (camera often blocked inside iframes) */
+#scan-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+}
+#photo-button { width: 100%; margin-top: 8px; justify-content: center; }

@@ -117,13 +117,36 @@ const modelPct = $("#model-pct");
 const modelProgress = $("#model-progress");
 const scanButton = $("#scan-button");
 const modelPreload = $("#model-preload");
+const photoImg = $("#scan-photo");
+const photoInput = $("#photo-input");
+const photoButton = $("#photo-button");
+let photoActive = false;
+let photoDataUrl = "";
 const modelNote = $("#model-note");
 const resultEmpty = $("#result-empty");
 const resultContent = $("#result-content");
 
 const SCAN_THRESHOLD = 0.45;
 const SCAN_TIMEOUT_MS = 90000;
-const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/dist/transformers.web.min.js";
+/**
+ * Browser-ESM entry points for Transformers.js, tried in order.
+ *
+ * The plain dist bundle (dist/transformers.web.min.js) begins with:
+ *   import*as e from"onnxruntime-common";import*as t from"onnxruntime-web";
+ * Those are BARE specifiers. A browser resolves a bare specifier relative to
+ * the importing script, so it requests
+ *   https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/dist/onnxruntime-common
+ * which 404s, and the dynamic import() rejects before a single line of the
+ * library runs. That file is a bundler intermediate, not a browser entry point.
+ *
+ * The `+esm` endpoints are pre-bundled with every bare specifier rewritten to
+ * a root-relative URL ("/npm/onnxruntime-common/+esm"), which is the only form
+ * a browser can actually resolve. Verified by inspecting the served bytes.
+ */
+const TRANSFORMERS_URLS = [
+  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/+esm",
+  "https://esm.sh/@huggingface/transformers@3.4.0",
+];
 const MODEL_ID = "Xenova/detr-resnet-50";
 // onnx/model_quantized.onnx for MODEL_ID, measured from the repo tree.
 const MODEL_BYTES = 43102531;
@@ -168,7 +191,8 @@ function setCamState(state, message) {
     camDot.classList.add("live");
     cameraBox.classList.add("live");
     camStatus.textContent = "live";
-    cameraState.innerHTML = "";
+    // an explicit message (e.g. "photo loaded") wins over clearing the panel
+    cameraState.innerHTML = message ? "<p>" + esc(message) + "</p>" : "";
     video.classList.add("active");
   } else if (state === "error") {
     camDot.classList.add("error");
@@ -345,8 +369,19 @@ async function loadDetector(opts = {}) {
 
   try {
     setModelLoading("Loading AI engine…", 0);
-    const mod = await import(TRANSFORMERS_URL);
-    if (!mod || typeof mod.pipeline !== "function") throw new Error("Transformers.js did not expose a pipeline() function.");
+    let mod = null;
+    const importErrors = [];
+    for (const url of TRANSFORMERS_URLS) {
+      try {
+        const candidate = await import(/* @vite-ignore */ url);
+        if (candidate && typeof candidate.pipeline === "function") { mod = candidate; break; }
+        importErrors.push(url + " — loaded but exposed no pipeline()");
+      } catch (importErr) {
+        console.warn("Could not load Transformers.js from " + url + ":", importErr);
+        importErrors.push(url + " — " + ((importErr && importErr.message) || String(importErr)));
+      }
+    }
+    if (!mod) throw new Error("Could not load the Transformers.js library. " + importErrors.join(" | "));
     const pipeline = mod.pipeline;
     const env = mod.env;
     if (env) env.allowLocalModels = false;
@@ -519,7 +554,21 @@ function clearOverlay() {
   overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 }
 
-function drawDetections(dets) {
+/**
+ * Draw detection boxes on the overlay.
+ *
+ * The pipeline returns `box: { xmin, ymin, xmax, ymax }` in PIXELS of the frame
+ * we handed it (transformers.js rescales back to the original image size). An
+ * earlier version read `b.x / b.y / b.width / b.height`, which are not keys the
+ * pipeline ever emits, so every value was undefined, coalesced to 0, and every
+ * box was drawn at the top-left corner with zero size — the boxes were never
+ * visible at all.
+ *
+ * Scaling is done from the known source pixel dimensions rather than the
+ * pipeline's `percentage` option, so the result does not depend on whether that
+ * option returns 0-100 or 0-1.
+ */
+function drawDetections(dets, srcW, srcH) {
   if (!overlayCtx || !overlayCanvas) return;
   const w = overlayCanvas.clientWidth || 1;
   const h = overlayCanvas.clientHeight || 1;
@@ -527,12 +576,23 @@ function drawDetections(dets) {
   overlayCanvas.height = h;
   overlayCtx.clearRect(0, 0, w, h);
 
+  const sw = Number(srcW) > 0 ? Number(srcW) : 1;
+  const sh = Number(srcH) > 0 ? Number(srcH) : 1;
+  const sx = w / sw;
+  const sy = h / sh;
+
   dets.forEach((d, i) => {
-    const b = d.box || {};
-    const x = ((b.x || 0) / 100) * w;
-    const y = ((b.y || 0) / 100) * h;
-    const bw = ((b.width || 0) / 100) * w;
-    const bh = ((b.height || 0) / 100) * h;
+    const b = (d && d.box) || {};
+    // primary shape from the pipeline; the fallback keeps older/stub shapes working
+    const left = Number.isFinite(b.xmin) ? b.xmin : (Number.isFinite(b.x) ? b.x : 0);
+    const top0 = Number.isFinite(b.ymin) ? b.ymin : (Number.isFinite(b.y) ? b.y : 0);
+    const right = Number.isFinite(b.xmax) ? b.xmax : left + (Number.isFinite(b.width) ? b.width : 0);
+    const bottom = Number.isFinite(b.ymax) ? b.ymax : top0 + (Number.isFinite(b.height) ? b.height : 0);
+    const x = left * sx;
+    const y = top0 * sy;
+    const bw = Math.max(0, (right - left) * sx);
+    const bh = Math.max(0, (bottom - top0) * sy);
+    if (bw <= 0 || bh <= 0) return;
     const top = i === 0;
     overlayCtx.lineWidth = top ? 3 : 2;
     overlayCtx.strokeStyle = top ? "#ffd23e" : "rgba(255,255,255,.75)";
@@ -557,17 +617,52 @@ function withTimeout(promise, ms, message) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+function readAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error || new Error("FileReader failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Scan a chosen photo instead of the live camera.
+ *
+ * getUserMedia is frequently unavailable even when a camera exists — inside a
+ * sandboxed or cross-origin iframe without an `allow="camera"` permission policy
+ * it throws a SecurityError before the user is ever prompted. This path runs the
+ * exact same model and the exact same analysis, so the scanner still works.
+ */
+async function loadPhoto(file) {
+  if (!file) return false;
+  if (!/^image\//.test(file.type || "")) {
+    setCamState("error", "That file is not an image. Choose a photo such as a JPG or PNG.");
+    return false;
+  }
+  photoDataUrl = await readAsDataURL(file);
+  photoActive = true;
+  if (photoImg) {
+    photoImg.src = photoDataUrl;
+    photoImg.hidden = false;
+  }
+  if (video) video.style.visibility = "hidden";
+  stopStream();
+  setCamState("live", "Photo loaded — press Scan Item");
+  return true;
+}
+
 async function runScan() {
   if (scanning) return;
 
-  if (camState !== "live") {
+  if (!photoActive && camState !== "live") {
     if (camState === "error" || camState === "paused" || camState === "off") {
       const started = await ensureCamera();
       if (!started) {
         renderNoVerdict({
           title: "CAMERA NOT AVAILABLE",
           meta: "Scan cancelled",
-          body: "The scanner needs the camera to identify an item. Use the manual lookup below to find the right bin instead.",
+          body: "The scanner needs the camera to identify an item. Choose \u201cUse a photo instead of the camera\u201d below, or use the manual lookup to find the right bin.",
         });
       }
     }
@@ -591,13 +686,14 @@ async function runScan() {
   syncScanButton();
 
   try {
-    const frame = captureFrame();
-    // NOTE: no `percentage: true`. That option multiplies every score by 100,
-    // which silently collapsed the whole confidence model — analyseDetection
-    // clamps to [0,1], so a 0.91 detection became 1.0 and every scan looked
-    // maximally certain. Scores are fractions here.
+    const frame = photoActive ? photoDataUrl : captureFrame();
+    const frameW = photoActive ? (photoImg.naturalWidth || 640) : captureCanvas.width;
+    const frameH = photoActive ? (photoImg.naturalHeight || 480) : captureCanvas.height;
+    // No `percentage` option: that flag rescales the BOX coordinates only (never
+    // the scores), and its scale is ambiguous. Boxes stay in pixels of `frame`,
+    // whose dimensions we know exactly, so drawDetections can scale them itself.
     const outputs = await withTimeout(detector(frame, { threshold: SCAN_THRESHOLD }), SCAN_TIMEOUT_MS, "Inference timed out");
-    handleDetections(outputs);
+    handleDetections(outputs, frameW, frameH);
   } catch (err) {
     console.error("Scan failed:", err);
     clearOverlay();
@@ -613,7 +709,7 @@ async function runScan() {
   }
 }
 
-function handleDetections(outputs) {
+function handleDetections(outputs, srcW, srcH) {
   const list = Array.isArray(outputs) ? outputs.slice() : [];
 
   if (!list.length) {
@@ -627,7 +723,7 @@ function handleDetections(outputs) {
   }
 
   list.sort((a, b) => (b.score || 0) - (a.score || 0));
-  drawDetections(list);
+  drawDetections(list, srcW, srcH);
 
   const analysis = analyseDetection(list[0]);
   const others = list.slice(1, 4).map((d) => String(d.label || "").toLowerCase() + " " + Math.round((d.score || 0) * 100) + "%");
@@ -1279,6 +1375,18 @@ function init() {
       " MB; both download once and are then cached, so roughly " + FIRST_RUN_MB +
       " MB on a first visit and almost nothing after that.";
   }
+  if (photoButton && photoInput) {
+    photoButton.addEventListener("click", () => { photoInput.click(); });
+    photoInput.addEventListener("change", () => {
+      const f = photoInput.files && photoInput.files[0];
+      photoInput.value = "";
+      if (f) loadPhoto(f).catch((err) => {
+        console.error("Could not read that photo:", err);
+        setCamState("error", "That photo could not be read. Try a different image.");
+      });
+    });
+  }
+
   if (modelPreload) {
     modelPreload.addEventListener("click", () => {
       modelPreload.disabled = true;

@@ -3,7 +3,9 @@
 //
 // Loads the real index.html + app.js in jsdom against a stubbed ONNX runtime.
 
-import { app, window, stub, env, doc } from "./harness.mjs";
+import fs from "node:fs";
+import path from "node:path";
+import { app, window, stub, env, doc, root, drawn } from "./harness.mjs";
 import {
   LABEL_TO_CONCEPT, CONCEPTS, ITEMS, GAME_ITEMS, REFERENCES, REFERENCE_ORDER,
 } from "../data.js";
@@ -58,7 +60,7 @@ for (const [l, want] of Object.entries(SA)) { const a = app.analyseDetection({ l
 ok("all 20 spot-checked SA mappings correct", wrong.length === 0, wrong.join("; ") || "all correct");
 
 console.log("\n=== 6. WHAT / WHERE / WHY / SCIENCE ===");
-app.__set({ detector: async () => [{ label: "bottle", score: 0.98, box: { x: 10, y: 10, width: 40, height: 40 } }] });
+app.__set({ detector: async () => [{ label: "bottle", score: 0.98, box: { xmin: 64, ymin: 48, xmax: 320, ymax: 384 } }] });
 await app.runScan();
 const rc = doc.querySelector("#result-content").textContent;
 for (const k of ["What", "Where", "Why", "Science"]) ok(`result contains "${k}"`, rc.includes(k));
@@ -252,7 +254,7 @@ ok("junk score is 0 not NaN", app.analyseDetection({ label: "bottle", score: "ab
 
 console.log("\n=== 18. REGRESSION: detector must not be asked for percentage scores ===");
 let seenOpts = null;
-app.__set({ camState: "live", detector: async (frame, o) => { seenOpts = o; return [{ label: "bottle", score: 0.93, box: { x: 1, y: 1, width: 9, height: 9 } }]; } });
+app.__set({ camState: "live", detector: async (frame, o) => { seenOpts = o; return [{ label: "bottle", score: 0.93, box: { xmin: 10, ymin: 10, xmax: 200, ymax: 300 } }]; } });
 await app.runScan();
 ok("threshold is passed", seenOpts && seenOpts.threshold === 0.45, JSON.stringify(seenOpts));
 ok("percentage:true is NOT passed", !seenOpts || !("percentage" in seenOpts), JSON.stringify(seenOpts));
@@ -270,10 +272,60 @@ const errs = []; const origErr = console.error;
 console.error = (...a) => { errs.push(a.join(" ")); };
 app.startGame(); app.activateTab("science"); app.activateTab("game"); app.activateTab("report"); app.activateTab("home");
 app.clearResult(); app.showManualItem(ITEMS[3].id); app.clearResult();
-app.__set({ camState: "live", detector: async () => [{ label: "banana", score: 0.95, box: { x: 1, y: 1, width: 10, height: 10 } }] });
+app.__set({ camState: "live", detector: async () => [{ label: "banana", score: 0.95, box: { xmin: 5, ymin: 5, xmax: 100, ymax: 90 } }] });
 await app.runScan();
 console.error = origErr;
 ok("no unexpected console.error", errs.length === 0, errs.join(" | ") || "clean");
+
+
+console.log("\n=== 21. REGRESSION: the CDN entry point must actually load in a browser ===");
+// This reads the REAL app.js, not the patched module under test — the bug it
+// guards against lived in the single line the build script replaces with a stub.
+const realSrc = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const entryUrls = [...realSrc.matchAll(/"(https:\/\/[^"]*transformers[^"]*)"/g)].map((m) => m[1]);
+console.log("   entry points:", entryUrls.join("\n                  "));
+ok("entry points declared", entryUrls.length >= 1, String(entryUrls.length));
+const badDist = entryUrls.filter((u) => /\/dist\/.*\.min?\.js$/.test(u));
+ok("no plain dist bundle (starts with bare specifiers, 404s, never loads)", badDist.length === 0, badDist.join(",") || "none");
+ok("every entry point is a pre-bundled browser ESM form", entryUrls.every((u) => /\+esm$/.test(u) || u.includes("esm.sh")), entryUrls.join(", "));
+ok("more than one CDN is tried as a fallback", entryUrls.length >= 2, String(entryUrls.length));
+
+
+console.log("\n=== 22. REGRESSION: detection boxes must actually render ===");
+// The pipeline emits box {xmin,ymin,xmax,ymax}. Reading x/y/width/height instead
+// yields undefined -> 0, and every box collapses to the top-left corner.
+drawn.strokeRect.length = 0; drawn.fillText.length = 0;
+app.__set({ camState: "live", detector: async () => [{ label: "bottle", score: 0.9, box: { xmin: 64, ymin: 48, xmax: 320, ymax: 384 } }] });
+await app.runScan();
+const bx = drawn.strokeRect[0];
+console.log("   first box drawn:", JSON.stringify(bx));
+ok("at least one box drawn", drawn.strokeRect.length >= 1, String(drawn.strokeRect.length));
+ok("box has non-zero width", !!bx && bx.w > 0, bx ? "w=" + bx.w : "none");
+ok("box has non-zero height", !!bx && bx.h > 0, bx ? "h=" + bx.h : "none");
+ok("box is not collapsed at the origin", !!bx && !(bx.w === 0 || bx.h === 0));
+ok("box is labelled", drawn.fillText.some((f) => /bottle/i.test(String(f.t))), drawn.fillText.map((f) => f.t).join(",") || "none");
+
+
+console.log("\n=== 23. PHOTO FALLBACK (camera blocked inside iframes) ===");
+ok("photo button exists", !!doc.querySelector("#photo-button"));
+ok("photo input exists and is hidden", !!doc.querySelector("#photo-input") && doc.querySelector("#photo-input").hidden);
+const bad = new window.File(["nope"], "notes.txt", { type: "text/plain" });
+Object.defineProperty(doc.querySelector("#photo-input"), "files", { value: [bad], configurable: true });
+doc.querySelector("#photo-input").dispatchEvent(new window.Event("change", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 5));
+ok("non-image is rejected with a message", /not an image/i.test(doc.querySelector("#camera-state").textContent), doc.querySelector("#camera-state").textContent);
+const png = new window.File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "item.png", { type: "image/png" });
+Object.defineProperty(doc.querySelector("#photo-input"), "files", { value: [png], configurable: true });
+app.__set({ camState: "off", detector: async () => [{ label: "bottle", score: 0.9, box: { xmin: 10, ymin: 10, xmax: 200, ymax: 300 } }] });
+doc.querySelector("#photo-input").dispatchEvent(new window.Event("change", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 15));
+ok("photo shown in the viewer", !doc.querySelector("#scan-photo").hidden);
+ok("status says the photo is loaded", /Photo loaded/i.test(doc.querySelector("#camera-state").textContent), doc.querySelector("#camera-state").textContent);
+drawn.strokeRect.length = 0;
+await app.runScan();
+const title = doc.querySelector("#result-content .cat-title")?.textContent || "";
+ok("scan works from a photo with no camera running", /BIN/i.test(title), title);
+ok("boxes drawn from the photo", drawn.strokeRect.length >= 1 && drawn.strokeRect[0].w > 0, JSON.stringify(drawn.strokeRect[0]));
 
 console.log(`\n=== TOTAL: ${pass} pass / ${fail} fail ===`);
 process.exit(fail ? 1 : 0);

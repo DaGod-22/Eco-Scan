@@ -105,6 +105,7 @@
 
             <div class="camera" id="camera">
               <video id="webcam" autoplay playsinline muted aria-label="Live camera preview"></video>
+              <img id="scan-photo" alt="The photo being scanned" hidden>
               <canvas id="overlay" aria-hidden="true"></canvas>
               <canvas id="capture" hidden></canvas>
               <div class="camera-frame" aria-hidden="true">
@@ -122,6 +123,9 @@
             </div>
 
             <button class="btn btn-ghost" id="model-preload" type="button" hidden>Download the AI model now</button>
+
+            <input type="file" id="photo-input" accept="image/*" hidden>
+            <button class="btn btn-ghost" id="photo-button" type="button">Use a photo instead of the camera</button>
 
             <button class="btn btn-scan" id="scan-button" type="button" data-action="scan" disabled>
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -273,6 +277,11 @@
                 <span class="log-version">v2.2</span>
                 <span class="log-date">Report &amp; model loading</span>
                 <p>Replaced the generated introduction with my own report, and moved the AI disclosure statement directly underneath it so the two read as one document while staying separate. Corrected the methane figures to 80&ndash;86&times; over 20 years and 28&times; over 100 years. Fixed two scanner defects: the recovery ladder was escalating to model files of 80&nbsp;MB and 159&nbsp;MB after failing to load the 41&nbsp;MB one, and detection scores were being multiplied by 100 and then clamped to 1.0, which made every scan look maximally certain. Moved the test suite into <code>tests/</code> so it ships with the project.</p>
+              </div>
+              <div class="log-entry">
+                <span class="log-version">v2.3</span>
+                <span class="log-date">Scanner fixed</span>
+                <p>Three defects that together made the scanner non-functional. (1) The library was loaded from <code>dist/transformers.web.min.js</code>, whose first line contains bare module specifiers that a browser cannot resolve &mdash; the import failed before any code ran. Now loaded from a pre-bundled <code>+esm</code> bundle, with a second CDN as fallback. (2) Detection boxes read <code>x/y/width/height</code>, keys the pipeline never emits, so every box collapsed to a zero-size rectangle at the origin and was invisible. Boxes are now read as <code>xmin/ymin/xmax/ymax</code> and scaled from the known frame size. (3) Added a photo path, because <code>getUserMedia</code> is blocked inside iframes without a camera permission policy.</p>
               </div>
             </div>
           </article>
