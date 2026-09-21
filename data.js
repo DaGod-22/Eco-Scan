@@ -426,7 +426,94 @@ export const CONCEPTS = {
     science: "Construction and demolition waste is sorted separately because its materials — concrete, brick, ceramic, timber — are recovered in bulk for aggregate and reuse rather than through a packaging line.",
     source: "charlessturt",
   },
+
+  "tissue": {
+    name: "tissue or paper towel",
+    materials: [{ name: "short-fibre paper", weight: 1, category: "organics" }],
+    unseen: [],
+    conditionRisk: 0.05,
+    why: "Most SA councils accept tissues and paper towel in the green organics bin. They are too soiled and fibres too short to recycle.",
+    science: "Tissue is made from deliberately short cellulose fibres and is usually contaminated. Composting recovers its carbon instead of trying to re-pulp it.",
+    source: "adelaideaz",
+  },
+  "carton": {
+    name: "carton (milk, juice, long-life)",
+    materials: [{ name: "paperboard with thin plastic lining", weight: 1, category: "recycling" }],
+    unseen: ["whether it is empty and rinsed"],
+    conditionRisk: 0.12,
+    why: "Milk and juice cartons are accepted in South Australia's yellow bin. Empty and rinse them first; flatten if you can.",
+    science: "A carton is mostly paperboard with a thin polyethylene liner. SA facilities hydrate it to separate the paper fibre, which is the largest fraction by mass.",
+    source: "charlessturt",
+  },
+  "soft-plastic": {
+    name: "soft plastic bag or wrapper",
+    materials: [{ name: "flexible polyethylene film", weight: 1, category: "landfill" }],
+    unseen: [],
+    conditionRisk: 0.04,
+    why: "Soft plastics — bags, bread bags, cling wrap, bubble wrap — go in the landfill bin, not the yellow bin.",
+    science: "Flexible film wraps around spinning shafts and star screens at a sorting facility. Staff must stop the line and cut it free by hand, which is why it is excluded.",
+    source: "adelaideaz",
+  },
+  "foil": {
+    name: "aluminium foil or tray",
+    materials: [{ name: "aluminium", weight: 1, category: "recycling" }],
+    unseen: ["whether it is clean and scrunched into a ball"],
+    conditionRisk: 0.15,
+    why: "Clean foil scrunched into a ball larger than a golf ball, and clean foil trays, go in the yellow bin. Food-soiled foil goes in landfill.",
+    science: "Foil is the same alloy as cans. Small flat sheets fall through screens, but a scrunched ball is large enough for eddy-current separators to recover.",
+    source: "charlessturt",
+  },
+  "paper": {
+    name: "paper or newspaper",
+    materials: [{ name: "paper", weight: 1, category: "recycling" }],
+    unseen: [],
+    conditionRisk: 0.05,
+    why: "Newspapers, magazines, office paper and junk mail go in the yellow bin. Shredded paper should be contained in a paper bag.",
+    science: "Paper is recycled by re-suspending fibres in water. Each cycle shortens fibres slightly, so paper can be recycled around five to seven times.",
+    source: "charlessturt",
+  },
+  "receipt": {
+    name: "retail receipt",
+    materials: [{ name: "thermal paper with BPA/BPS coating", weight: 1, category: "landfill" }],
+    unseen: [],
+    conditionRisk: 0.03,
+    why: "Receipts go in the landfill bin, not recycling, because of their chemical coating.",
+    science: "Most thermal receipts are coated with BPA or BPS developer. Recycling them would spread that coating through an entire batch of paper pulp.",
+    source: "adelaideaz",
+  },
+  "polystyrene": {
+    name: "polystyrene foam",
+    materials: [{ name: "expanded polystyrene (EPS)", weight: 1, category: "landfill" }],
+    unseen: [],
+    conditionRisk: 0.04,
+    why: "Foam cups, trays and packaging go in the landfill bin, even if they have a recycling symbol.",
+    science: "EPS is about 95% air, too light for density separation, and breaks into beads that contaminate every other stream.",
+    source: "goolwa",
+  },
+
+  "tyre": {
+    name: "tyre",
+    materials: [{ name: "rubber and steel", weight: 1, category: "dropoff" }],
+    unseen: [],
+    conditionRisk: 0.04,
+    why: "Tyres do not go in any household bin. Return them to a tyre retailer or take them to a waste depot — most charge a small fee.",
+    science: "Tyres trap methane in landfill and can catch fire. Shredded, they become aggregate, playground surface or fuel in controlled facilities.",
+    source: "charlessturt",
+  },
+  "cable": {
+    name: "cable, charger or power board",
+    materials: [{ name: "copper and plastic", weight: 1, category: "dropoff" }],
+    unseen: [],
+    conditionRisk: 0.03,
+    why: "Cables, chargers and power boards are e-waste. Take them to an e-waste drop-off, not a household bin.",
+    science: "Cables are copper inside plastic sheath — valuable when shredded in an e-waste plant, but a classic tangler that jams sorting lines.",
+    source: "gisa-batteries",
+  },
 };
+
+
+
+
 
 /* ------------------------------------------------------------------
    CONFIDENCE

@@ -149,9 +149,11 @@ const WASM_BYTES = 23929658;
 const FIRST_RUN_MB = ((MODEL_BYTES + WASM_BYTES) / 1048576).toFixed(0);
 
 // Classification fallback — tiny model that recognises ~1000 ImageNet classes
-// Used only when DETR returns empty or unknown, to catch bottles, cans, etc.
+// Used when DETR returns empty/unknown AND in parallel to improve recall for
+// tissue, cartons, soft plastic etc. that DETR (COCO-91) can never see.
 const CLASSIFICATION_MODEL_ID = "Xenova/mobilenet_v3_small_100_224";
-const CLASSIFICATION_THRESHOLD = 0.28;
+const CLASSIFICATION_THRESHOLD = 0.15;
+const CLASSIFICATION_TOPK = 10;
 const CLASSIFICATION_MODEL_MB = "4.0";
 
 /* ==================================================================
@@ -585,12 +587,13 @@ function analyseDetection(det) {
 /* ---------------- Classification fallback mapping ---------------- */
 
 const CLASSIFICATION_KEYWORDS = [
+  // High-value packaging that DETR already sees but classifier helps confirm
   { keys: ["water bottle", "pop bottle", "beer bottle", "wine bottle", "bottle", "milk can", "pop can", "beer can", "tin can", "can", "beer glass", "red wine", "measuring cup"], concept: "bottle" },
   { keys: ["book jacket", "book", "paperback"], concept: "book" },
   { keys: ["banana", "apple", "orange", "broccoli", "carrot", "lemon", "strawberry", "pineapple", "mushroom", "bell pepper", "cucumber", "corn", "cauliflower", "zucchini", "artichoke", "custard apple", "pomegranate", "fig", "guacamole", "fruit", "vegetable", "granny smith"], concept: "food-fresh" },
-  { keys: ["pizza", "sandwich", "hot dog", "hamburger", "cheeseburger", "cake", "donut", "bagel", "pretzel", "burrito", "taco", "carbonara", "meat loaf", "potpie", "burrito"], concept: "food-prepared" },
+  { keys: ["pizza", "sandwich", "hot dog", "hamburger", "cheeseburger", "cake", "donut", "bagel", "pretzel", "burrito", "taco", "carbonara", "meat loaf", "potpie"], concept: "food-prepared" },
   { keys: ["wine glass", "goblet"], concept: "drinking-glass" },
-  { keys: ["cup", "mug", "espresso", "coffee mug", "cup"], concept: "cup-mug" },
+  { keys: ["cup", "mug", "espresso", "coffee mug"], concept: "cup-mug" },
   { keys: ["bowl", "plate", "platter", "crockery", "mixing bowl", "soup bowl"], concept: "crockery" },
   { keys: ["vase"], concept: "glass-decor" },
   { keys: ["mirror"], concept: "mirror" },
@@ -606,18 +609,25 @@ const CLASSIFICATION_KEYWORDS = [
   { keys: ["hat", "tie", "shoe", "handbag", "backpack", "suitcase", "clothing", "shirt", "jacket", "jeans", "sweater", "textile", "wool", "jean", "cardigan", "jersey"], concept: "textile" },
   { keys: ["frisbee", "sports ball", "ball", "football", "basketball", "tennis ball", "golf ball", "soccer ball", "volleyball", "baseball", "rugby ball"], concept: "rigid-plastic-goods" },
   { keys: ["toothbrush", "scissors", "eyeglasses", "sunglasses", "sunglass"], concept: "small-mixed-plastic" },
-  { keys: ["teddy bear", "teddy", "toy", "doll", "teddy bear", "jigsaw puzzle"], concept: "soft-toy" },
+  { keys: ["teddy bear", "teddy", "toy", "doll", "jigsaw puzzle"], concept: "soft-toy" },
   { keys: ["chair", "couch", "sofa", "bed", "desk", "table", "bench", "furniture", "bookcase", "filing cabinet"], concept: "furniture" },
   { keys: ["door", "sink", "toilet", "bathtub", "shower curtain"], concept: "building-fixture" },
   { keys: ["person", "people", "man", "woman", "child", "boy", "girl", "dog", "cat", "bird", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter"], concept: "not-waste" },
-  // Extra waste-relevant ImageNet labels
-  { keys: ["plastic bag", "shopping bag", "trash bag", "bin bag", "polythene"], concept: "mixed-goods" },
-  { keys: ["cardboard", "carton", "envelope", "packet", "mailbag"], concept: "book" },
-  { keys: ["aluminum foil", "tin foil", "foil"], concept: "bottle" },
-  { keys: ["candle", "lighter"], concept: "small-mixed-plastic" },
-  { keys: ["broom", "mop", "brush"], concept: "mixed-goods" },
-  { keys: ["bucket", "pail", "barrel"], concept: "bottle" },
-  { keys: ["ashcan", "trash can", "dustbin", "wastebin"], concept: "bulky-goods" },
+
+  // ---- NEW: items DETR (COCO-91) cannot see — core of the \"never recognises\" fix ----
+  { keys: ["tissue", "tissue paper", "toilet tissue", "toilet paper", "paper towel", "paper towels", "napkin", "serviette", "kleenex", "paper napkin", "toilet roll", "paper hand towel"], concept: "tissue" },
+  { keys: ["carton", "milk carton", "juice carton", "juice box", "milk", "soy milk", "almond milk", "chocolate milk", "juice", "orange juice", "apple juice", "long-life milk", "tetra pak", "tetrapak", "uht milk", "milk box", "beverage carton"], concept: "carton" },
+  { keys: ["foil", "aluminum foil", "aluminium foil", "tin foil", "foil tray", "aluminum tray", "aluminium tray", "pie tin", "foil container"], concept: "foil" },
+  { keys: ["plastic bag", "shopping bag", "carrier bag", "bread bag", "sandwich bag", "zip bag", "ziplock", "ziploc", "cling wrap", "cling film", "plastic wrap", "bubble wrap", "wrapper", "polythene bag", "bin bag", "trash bag", "grocery bag", "produce bag", "soft plastic", "flexible plastic", "film wrap"], concept: "soft-plastic" },
+  { keys: ["newspaper", "newspapers", "paper", "magazine", "junk mail", "office paper", "paper bag", "cardboard", "paper towel roll", "cardboard box"], concept: "paper" },
+  { keys: ["envelope", "letter", "mail", "mailing", "window envelope", "paper envelope", "manila envelope"], concept: "paper" },
+  { keys: ["receipt", "till receipt", "cash receipt", "thermal paper"], concept: "receipt" },
+  { keys: ["polystyrene", "styrofoam", "foam", "foam cup", "foam tray", "foam box", "foam packaging", "eps", "styrene"], concept: "polystyrene" },
+  { keys: ["tyre", "tire", "car tyre", "car tire", "rubber tyre", "rubber tire"], concept: "tyre" },
+  { keys: ["cable", "charger", "power cable", "usb cable", "extension cord", "power board", "power strip", "charging cable", "lead", "cord", "power cord", "ethernet cable"], concept: "cable" },
+  { keys: ["plastic bag", "mailbag", "packet"], concept: "soft-plastic" },
+  { keys: ["bucket", "pail", "barrel", "ashcan", "trash can", "dustbin", "wastebin"], concept: "bottle" },
+  { keys: ["candle", "lighter", "broom", "mop", "brush"], concept: "small-mixed-plastic" },
 ];
 
 function classificationLabelToConceptKey(label) {
@@ -632,6 +642,21 @@ function classificationLabelToConceptKey(label) {
     }
   }
   return null;
+}
+
+function classifierLadder() {
+  const dtypes = ["q8", "fp32", "fp16"];
+  const ladder = [];
+  for (const dtype of dtypes) {
+    ladder.push({ label: "CPU · WASM · " + dtype, opts: { device: "wasm", dtype }, proxy: true });
+    ladder.push({ label: "CPU · WASM · " + dtype, opts: { device: "wasm", dtype }, proxy: false });
+  }
+  if (typeof navigator !== "undefined" && navigator.gpu) {
+    for (const dtype of dtypes) {
+      ladder.push({ label: "GPU · WebGPU · " + dtype, opts: { device: "webgpu", dtype }, proxy: false });
+    }
+  }
+  return ladder;
 }
 
 async function loadClassifier(opts = {}) {
@@ -651,7 +676,7 @@ async function loadClassifier(opts = {}) {
 
     setModelLoading("Loading image classifier (~" + CLASSIFICATION_MODEL_MB + " MB) for fallback…", 10);
     const errors = [];
-    for (const step of deviceLadder()) {
+    for (const step of classifierLadder()) {
       if (env && env.backends && env.backends.onnx && env.backends.onnx.wasm) {
         env.backends.onnx.wasm.proxy = !!step.proxy;
       }
@@ -671,7 +696,7 @@ async function loadClassifier(opts = {}) {
         return classifier;
       } catch (e) {
         console.warn("Classifier backend failed", step.label, e);
-        errors.push(String(e && e.message ? e.message : e));
+        errors.push(step.label + ": " + String(e && e.message ? e.message : e));
         classifier = null;
       }
     }
@@ -686,45 +711,51 @@ async function loadClassifier(opts = {}) {
   }
 }
 
-async function tryClassificationFallback(frame) {
-  if (!frame) return null;
+async function tryClassificationFallback(frame, opts = {}) {
+  if (!frame) return [];
   try {
     const clf = classifier || await loadClassifier();
-    if (!clf) return null;
+    if (!clf) return [];
 
-    const results = await withTimeout(clf(frame, { topk: 5 }), 20000, "Classification timed out");
+    const topk = opts.topk || CLASSIFICATION_TOPK;
+    const threshold = opts.threshold != null ? opts.threshold : CLASSIFICATION_THRESHOLD;
+    const results = await withTimeout(clf(frame, { topk }), 20000, "Classification timed out");
     const list = Array.isArray(results) ? results : [results];
 
     const candidates = [];
     for (const r of list) {
       const score = normaliseScore(r.score);
-      if (score < CLASSIFICATION_THRESHOLD) continue;
+      if (score < threshold) continue;
       const conceptKey = classificationLabelToConceptKey(r.label);
       if (!conceptKey) continue;
       const analysis = analyseConceptKey(conceptKey, score, String(r.label || "").toLowerCase(), "classification");
       if (!analysis) continue;
       if (analysis.category === "none") continue;
-      // Boost if disposalScore decent
       candidates.push({ result: r, analysis, score });
     }
 
-    if (!candidates.length) return null;
+    if (!candidates.length) return [];
 
-    // Rank by disposalScore, then raw score
+    // Rank by disposalScore, then raw score, then not-waste suppression
     candidates.sort((a, b) => {
+      // Prefer waste over not-waste
+      const aWaste = a.analysis.category === "notwaste" ? 0 : 1;
+      const bWaste = b.analysis.category === "notwaste" ? 0 : 1;
+      if (bWaste !== aWaste) return bWaste - aWaste;
       if (b.analysis.disposalScore !== a.analysis.disposalScore) return b.analysis.disposalScore - a.analysis.disposalScore;
       return b.score - a.score;
     });
 
-    const best = candidates[0].analysis;
-    // Only return if at least partly confident or material not ambiguous
-    if (best.category === "none") return null;
-    // If uncertain but classification is our only hope, still return it — UI will show uncertain
-    return best;
+    return candidates;
   } catch (err) {
     console.warn("Classification fallback failed", err);
-    return null;
+    return [];
   }
+}
+
+async function tryClassificationBest(frame, opts = {}) {
+  const cands = await tryClassificationFallback(frame, opts);
+  return cands.length ? cands[0].analysis : null;
 }
 
 /* ==================================================================
@@ -935,18 +966,20 @@ async function runScan() {
 }
 
 /**
- * New multi-object pipeline:
- * - Analyses ALL detections above threshold, not just top score
- * - Ranks by disposal confidence (not just detection confidence)
- * - Falls back to image classification when DETR is empty/unknown
- * - Handles material ambiguity by surfacing alternatives
+ * Multi-object pipeline v2 — always runs classification in parallel:
+ * - Analyses ALL DETR detections above threshold, ranked by disposalScore
+ * - Runs MobileNetV3 classification (topk 10, threshold 0.15) at same time
+ * - Merges both streams into one ranking by disposalScore → detectionScore → area
+ * - Handles material ambiguity, not-waste suppression, and tissue/carton etc.
  */
 async function handleDetections(outputs, frame) {
   const list = Array.isArray(outputs) ? outputs.slice() : [];
 
+  // Start classification immediately in parallel — do not wait for DETR analysis
+  const classificationPromise = tryClassificationFallback(frame);
+
   // Always draw what we have, even if empty (clears)
   if (list.length) {
-    // Sort initially by detection score for drawing order (top = highest)
     list.sort((a, b) => (b.score || 0) - (a.score || 0));
     drawDetections(list);
   } else {
@@ -957,87 +990,91 @@ async function handleDetections(outputs, frame) {
   const analysed = list.map((det) => {
     const analysis = analyseDetection(det);
     const area = boxAreaFraction(det.box);
-    return { det, analysis, area, score: det.score || 0 };
+    return { det, analysis, area, score: det.score || 0, kind: "detection" };
   });
 
-  // Filter out truly unknown labels for primary ranking, but keep them for "also"
   const known = analysed.filter(x => x.analysis && x.analysis.category !== "none");
   const unknown = analysed.filter(x => !x.analysis || x.analysis.category === "none");
 
-  // Rank known by: disposalScore desc, then detectionScore desc, then box area desc
-  known.sort((a, b) => {
+  // Await classification candidates (already running)
+  let classCands = [];
+  try {
+    classCands = await classificationPromise;
+  } catch (_) {
+    classCands = [];
+  }
+
+  const classAnalysed = (classCands || []).map(c => ({
+    det: { label: c.result.label, score: c.score },
+    analysis: c.analysis,
+    area: 0,
+    score: c.score,
+    kind: "classification",
+  }));
+
+  // Merge both streams for ranking
+  const mergedKnown = [...known, ...classAnalysed].filter(x => x.analysis && x.analysis.category !== "none");
+
+  // Rank merged by: waste preference, disposalScore desc, detectionScore desc, area desc
+  mergedKnown.sort((a, b) => {
+    const aWaste = a.analysis.category === "notwaste" ? 0 : 1;
+    const bWaste = b.analysis.category === "notwaste" ? 0 : 1;
+    if (bWaste !== aWaste) return bWaste - aWaste;
     if (b.analysis.disposalScore !== a.analysis.disposalScore) return b.analysis.disposalScore - a.analysis.disposalScore;
     if (b.analysis.detectionScore !== a.analysis.detectionScore) return b.analysis.detectionScore - a.analysis.detectionScore;
-    if (b.area !== a.area) return b.area - a.area;
-    return b.score - a.score;
+    if ((b.area || 0) !== (a.area || 0)) return (b.area || 0) - (a.area || 0);
+    return (b.score || 0) - (a.score || 0);
   });
 
-  const others = analysed.slice(0, 6).map(x => {
+  // Also-in-frame list from DETR only (for UI context)
+  const othersDet = analysed.slice(0, 6).map(x => {
     const label = String(x.det.label || x.analysis.rawLabel || "unknown").toLowerCase();
     const pct = Math.round((x.analysis.detectionScore || x.score || 0) * 100);
     const cat = x.analysis.confidentCategory || x.analysis.category;
     const catShort = (CATEGORIES[cat] && CATEGORIES[cat].short) ? " → " + CATEGORIES[cat].short : "";
     return label + " " + pct + "%" + catShort;
-  }).filter((_, i) => i > 0).slice(0, 4);
+  }).filter((_, i) => i > 0).slice(0, 3);
 
-  // Case 1: nothing detected at all — try classification fallback
-  if (!list.length) {
-    const fallback = await tryClassificationFallback(frame);
-    if (fallback) {
-      // Show fallback as primary
-      renderScanResult(fallback, others);
+  const othersClass = classAnalysed.slice(0, 4).map(x => {
+    const label = String(x.analysis.rawLabel || x.det.label || "unknown").toLowerCase();
+    const pct = Math.round((x.analysis.detectionScore || 0) * 100);
+    const cat = x.analysis.confidentCategory || x.analysis.category;
+    const catShort = (CATEGORIES[cat] && CATEGORIES[cat].short) ? " → " + CATEGORIES[cat].short : "";
+    return label + " " + pct + "%" + catShort + " (classifier)";
+  });
+
+  const others = [...othersDet, ...othersClass].slice(0, 5);
+
+  // Case 1: nothing detected at all and classification found nothing
+  if (!mergedKnown.length) {
+    if (!list.length) {
+      renderNoVerdict({
+        title: "NO OBJECT DETECTED",
+        meta: "Nothing above " + Math.round(SCAN_THRESHOLD * 100) + "% detection confidence",
+        body: "The scanner could not confidently identify anything in that frame. Move closer so the item fills the frame, improve the lighting, and scan again — or use the manual lookup below. The app also tried a secondary image classifier (~" + CLASSIFICATION_MODEL_MB + " MB, top-" + CLASSIFICATION_TOPK + " at " + Math.round(CLASSIFICATION_THRESHOLD * 100) + "%) and found nothing recognisable. For tissue, milk cartons, foil and soft plastic bags, try the classifier-focused tips: fill the frame, plain background, good light.",
+      });
       return;
     }
-    renderNoVerdict({
-      title: "NO OBJECT DETECTED",
-      meta: "Nothing above " + Math.round(SCAN_THRESHOLD * 100) + "% detection confidence",
-      body: "The scanner could not confidently identify anything in that frame. Move closer so the item fills the frame, improve the lighting, and scan again — or use the manual lookup below. The app also tried a secondary image classifier (~" + CLASSIFICATION_MODEL_MB + " MB) and found nothing recognisable.",
-    });
-    return;
-  }
-
-  // Case 2: all detections are unknown labels
-  if (!known.length) {
-    const fallback = await tryClassificationFallback(frame);
-    if (fallback) {
-      renderScanResult(fallback, others);
-      return;
-    }
+    // DETR found something but all unknown and classifier empty
     const firstUnknown = analysed[0] ? analysed[0].analysis : { rawLabel: "unknown", detectionScore: 0 };
     renderNoVerdict({
       title: "ITEM NOT RECOGNISED",
       meta: "Detected: " + esc(firstUnknown.rawLabel || "unknown") + " · " + Math.round((firstUnknown.detectionScore || 0) * 100) + "% detection confidence",
-      body: "The scanner found something but has no South Australian disposal rule for it. It also tried a secondary classifier that knows ~1000 everyday objects and still could not map it to a bin. Check the manual lookup below or the official Which Bin guide rather than guessing.",
+      body: "The scanner found something but has no South Australian disposal rule for it. It also tried a secondary classifier that knows ~1000 everyday objects (including tissue, carton, foil, soft plastic) and still could not map it to a bin. Check the manual lookup below or the official Which Bin guide rather than guessing.",
       also: others,
     });
     return;
   }
 
-  // Case 3: we have at least one known concept — pick best by disposalScore
-  const best = known[0];
-
-  // If best is uncertain/low-confidence, see if classification can do better
-  if (best.analysis.category === "uncertain" || best.analysis.disposalScore < 0.5) {
-    const fallback = await tryClassificationFallback(frame);
-    if (fallback && fallback.disposalScore > best.analysis.disposalScore && fallback.category !== "uncertain" && fallback.category !== "none") {
-      // Prefer confident classification over uncertain detection
-      const combinedOthers = [best.analysis.rawLabel + " " + Math.round(best.analysis.detectionScore * 100) + "% → " + (CATEGORIES[best.analysis.confidentCategory]?.short || best.analysis.category), ...others].slice(0, 4);
-      renderScanResult(fallback, combinedOthers);
-      return;
-    }
+  // Case 2: merged best — prefer waste over not-waste already handled in sort,
+  // but double-check: if best is not-waste and there is waste, skip
+  let bestEntry = mergedKnown[0];
+  if (bestEntry.analysis.category === "notwaste") {
+    const wasteCandidate = mergedKnown.find(x => x.analysis.category !== "notwaste" && x.analysis.category !== "none" && x.analysis.category !== "uncertain");
+    if (wasteCandidate) bestEntry = wasteCandidate;
   }
 
-  // If best is not-waste (person, animal, vehicle), but there is a waste item also present, prefer waste
-  if (best.analysis.category === "notwaste") {
-    const wasteCandidate = known.find(x => x.analysis.category !== "notwaste" && x.analysis.category !== "none");
-    if (wasteCandidate) {
-      renderScanResult(wasteCandidate.analysis, others);
-      return;
-    }
-  }
-
-  // Normal confident path
-  renderScanResult(best.analysis, others);
+  renderScanResult(bestEntry.analysis, others);
 }
 
 /* ==================================================================
