@@ -88,6 +88,8 @@ let modelFailed = false;
 let modelBackend = null;
 let camState = "starting"; // starting | live | error | paused | off
 let scanning = false;
+let lastCaptureW = 640;
+let lastCaptureH = 480;
 
 let gameScore = 0;
 let answered = 0;
@@ -104,7 +106,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const video = $("#webcam");
 const captureCanvas = $("#capture");
-const captureCtx = captureCanvas.getContext("2d", { willReadFrequently: true });
+const captureCtx = captureCanvas ? captureCanvas.getContext("2d", { willReadFrequently: true }) : null;
 const overlayCanvas = $("#overlay");
 const overlayCtx = overlayCanvas ? overlayCanvas.getContext("2d") : null;
 const cameraBox = $("#camera");
@@ -123,7 +125,11 @@ const resultContent = $("#result-content");
 
 const SCAN_THRESHOLD = 0.45;
 const SCAN_TIMEOUT_MS = 90000;
-const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/dist/transformers.web.min.js";
+// FIX: previous URL transformers.web.min.js is not a self-contained ESM.
+// It starts with `import * as e from \"onnxruntime-common\"` and fails in
+// browsers with bare specifier errors, so the model never loads.
+// jsDelivr +esm rewrites those to absolute ESM URLs and works.
+const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/+esm";
 const MODEL_ID = "Xenova/detr-resnet-50";
 // onnx/model_quantized.onnx for MODEL_ID, measured from the repo tree.
 const MODEL_BYTES = 43102531;
@@ -160,43 +166,45 @@ $$(".bnav-item").forEach((btn) => btn.addEventListener("click", () => activateTa
    ================================================================== */
 function setCamState(state, message) {
   camState = state;
-  camDot.classList.remove("live", "error");
-  cameraBox.classList.remove("live", "scanning");
-  cameraState.classList.remove("error");
+  if (camDot) camDot.classList.remove("live", "error");
+  if (cameraBox) cameraBox.classList.remove("live", "scanning");
+  if (cameraState) cameraState.classList.remove("error");
 
   if (state === "live") {
-    camDot.classList.add("live");
-    cameraBox.classList.add("live");
-    camStatus.textContent = "live";
-    cameraState.innerHTML = "";
-    video.classList.add("active");
+    if (camDot) camDot.classList.add("live");
+    if (cameraBox) cameraBox.classList.add("live");
+    if (camStatus) camStatus.textContent = "live";
+    if (cameraState) cameraState.innerHTML = "";
+    if (video) video.classList.add("active");
   } else if (state === "error") {
-    camDot.classList.add("error");
+    if (camDot) camDot.classList.add("error");
     cameraStatusError(message);
   } else if (state === "paused") {
-    camStatus.textContent = "paused";
-    cameraState.innerHTML = '<p>' + icon("cameraOff", 18) + " Camera paused. Return to the Scan tab to resume.</p>";
-    video.classList.remove("active");
+    if (camStatus) camStatus.textContent = "paused";
+    if (cameraState) cameraState.innerHTML = '<p>' + icon("cameraOff", 18) + " Camera paused. Return to the Scan tab to resume.</p>";
+    if (video) video.classList.remove("active");
   } else if (state === "off") {
-    camStatus.textContent = "off";
-    cameraState.innerHTML = '<p>' + icon("cameraOff", 18) + " Camera released while this tab was hidden. Press Scan Item to restart it.</p>";
-    video.classList.remove("active");
+    if (camStatus) camStatus.textContent = "off";
+    if (cameraState) cameraState.innerHTML = '<p>' + icon("cameraOff", 18) + " Camera released while this tab was hidden. Press Scan Item to restart it.</p>";
+    if (video) video.classList.remove("active");
   } else {
-    camStatus.textContent = "starting";
-    cameraState.innerHTML = "<p>Requesting camera access…</p>";
-    video.classList.remove("active");
+    if (camStatus) camStatus.textContent = "starting";
+    if (cameraState) cameraState.innerHTML = "<p>Requesting camera access…</p>";
+    if (video) video.classList.remove("active");
   }
   syncScanButton();
 }
 
 function cameraStatusError(message) {
-  camStatus.textContent = "no camera";
-  cameraState.classList.add("error");
-  cameraState.innerHTML =
-    '<p>' + esc(message || "Camera unavailable.") + '</p>' +
-    '<button class="btn btn-ghost btn-sm" type="button" id="cam-retry">' + icon("refresh", 16) + " Try again</button>";
-  const retry = $("#cam-retry");
-  if (retry) retry.addEventListener("click", () => { startCamera(); });
+  if (camStatus) camStatus.textContent = "no camera";
+  if (cameraState) {
+    cameraState.classList.add("error");
+    cameraState.innerHTML =
+      '<p>' + esc(message || "Camera unavailable.") + '</p>' +
+      '<button class="btn btn-ghost btn-sm" type="button" id="cam-retry">' + icon("refresh", 16) + " Try again</button>";
+    const retry = $("#cam-retry");
+    if (retry) retry.addEventListener("click", () => { startCamera(); });
+  }
 }
 
 async function startCamera() {
@@ -221,8 +229,28 @@ async function startCamera() {
       }
     }
     cameraStream = stream;
-    video.srcObject = cameraStream;
-    await video.play();
+    if (video) {
+      video.srcObject = cameraStream;
+      // Ensure video metadata is loaded before play
+      if (video.readyState < 1) {
+        await new Promise((res, rej) => {
+          const onLoaded = () => { cleanup(); res(); };
+          const onErr = (e) => { cleanup(); rej(e); };
+          const cleanup = () => {
+            video.removeEventListener("loadedmetadata", onLoaded);
+            video.removeEventListener("error", onErr);
+          };
+          video.addEventListener("loadedmetadata", onLoaded, { once: true });
+          video.addEventListener("error", onErr, { once: true });
+          // safety timeout
+          setTimeout(() => { cleanup(); res(); }, 1500);
+        });
+      }
+      try { await video.play(); } catch (playErr) {
+        // Autoplay may be blocked, but we still have stream
+        console.warn("video.play() failed:", playErr);
+      }
+    }
     setCamState("live");
     return true;
   } catch (err) {
@@ -248,7 +276,7 @@ function stopStream() {
     try { cameraStream.getTracks().forEach((t) => t.stop()); } catch (err) { console.warn("Could not stop a camera track:", err); }
     cameraStream = null;
   }
-  if (video.srcObject) video.srcObject = null;
+  if (video && video.srcObject) video.srcObject = null;
   clearOverlay();
 }
 
@@ -271,15 +299,6 @@ function ensureCamera() {
  * Every step here resolves to the SAME file on the model repo
  * (onnx/model_quantized.onnx, 41.1 MiB), so retrying a failed backend is free —
  * the bytes are already in the HTTP cache.
- *
- * This ladder used to escalate to webgpu/fp16 (79.9 MiB) and then wasm/fp32
- * (159.1 MiB). Each "recovery" attempt therefore downloaded a model up to four
- * times larger than the one that had just failed — 303 MiB in total before
- * giving up. Recovery must never cost more than the attempt it is recovering
- * from. Verified sizes from the repo tree:
- *   q8/model_quantized.onnx  43,102,531 B   <- used by every step
- *   fp16/model_fp16.onnx     83,812,437 B   <- never requested
- *   fp32/model.onnx         166,789,212 B   <- never requested
  */
 function deviceLadder() {
   const ladder = [
@@ -294,37 +313,49 @@ function deviceLadder() {
 
 function setModelLoading(text, pct) {
   modelFailed = false;
-  modelState.classList.remove("ready", "error");
-  modelText.textContent = text || "Loading AI model…";
-  modelPct.textContent = pct != null ? pct + "%" : "";
-  modelProgress.style.width = (pct != null ? pct : 0) + "%";
-  modelProgress.setAttribute("aria-valuenow", String(pct != null ? pct : 0));
+  if (modelState) modelState.classList.remove("ready", "error");
+  if (modelText) modelText.textContent = text || "Loading AI model…";
+  if (modelPct) modelPct.textContent = pct != null ? pct + "%" : "";
+  if (modelProgress) {
+    modelProgress.style.width = (pct != null ? pct : 0) + "%";
+    modelProgress.setAttribute("aria-valuenow", String(pct != null ? pct : 0));
+  }
   syncScanButton();
 }
 
 function setModelReady() {
   modelFailed = false;
-  modelState.classList.add("ready");
-  modelState.classList.remove("error");
-  modelText.textContent = modelBackend ? "AI model ready · " + modelBackend : "AI model ready";
-  modelPct.textContent = "";
-  modelProgress.style.width = "100%";
-  modelProgress.setAttribute("aria-valuenow", "100");
-  const old = modelState.querySelector(".model-retry");
-  if (old) old.remove();
+  if (modelState) {
+    modelState.classList.add("ready");
+    modelState.classList.remove("error");
+  }
+  if (modelText) modelText.textContent = modelBackend ? "AI model ready · " + modelBackend : "AI model ready";
+  if (modelPct) modelPct.textContent = "";
+  if (modelProgress) {
+    modelProgress.style.width = "100%";
+    modelProgress.setAttribute("aria-valuenow", "100");
+  }
+  if (modelState) {
+    const old = modelState.querySelector(".model-retry");
+    if (old) old.remove();
+  }
   syncScanButton();
 }
 
 function setModelError(msg) {
   modelFailed = true;
-  modelState.classList.add("error");
-  modelState.classList.remove("ready");
-  modelText.textContent = msg || "Could not load the AI model.";
-  modelPct.textContent = "";
-  modelProgress.style.width = "0%";
-  modelProgress.setAttribute("aria-valuenow", "0");
+  if (modelState) {
+    modelState.classList.add("error");
+    modelState.classList.remove("ready");
+  }
+  if (modelText) modelText.textContent = msg || "Could not load the AI model.";
+  if (modelPct) modelPct.textContent = "";
+  if (modelProgress) {
+    modelProgress.style.width = "0%";
+    modelProgress.setAttribute("aria-valuenow", "0");
+  }
 
-  if (!modelState.querySelector(".model-retry")) {
+  if (modelState && !modelState.querySelector(".model-retry")) {
     const row = modelState.querySelector(".model-row");
     const btn = document.createElement("button");
     btn.type = "button";
@@ -337,6 +368,33 @@ function setModelError(msg) {
   syncScanButton();
 }
 
+const TRANSFORMERS_FALLBACKS = [
+  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/+esm",
+  "https://esm.run/@huggingface/transformers@3.4.0",
+  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/dist/transformers.min.js",
+];
+
+async function importTransformersWithFallback() {
+  const urls = [TRANSFORMERS_URL, ...TRANSFORMERS_FALLBACKS.filter(u => u !== TRANSFORMERS_URL)];
+  let lastErr = null;
+  for (const url of urls) {
+    try {
+      let host = url;
+      try { host = new URL(url, location.href).hostname; } catch (_) { host = url; }
+      setModelLoading("Loading AI engine from " + host + "…", 0);
+      const mod = await import(url);
+      if (mod && typeof mod.pipeline === "function") return mod;
+      // Some bundles expose default
+      if (mod && mod.default && typeof mod.default.pipeline === "function") return mod.default;
+      throw new Error("pipeline not found in " + url);
+    } catch (e) {
+      console.warn("Transformers import failed for", url, e);
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("All transformer CDN imports failed");
+}
+
 async function loadDetector(opts = {}) {
   if (detector && !opts.force) return detector;
   if (modelLoading) return null;
@@ -345,11 +403,19 @@ async function loadDetector(opts = {}) {
 
   try {
     setModelLoading("Loading AI engine…", 0);
-    const mod = await import(TRANSFORMERS_URL);
+    const mod = await importTransformersWithFallback();
     if (!mod || typeof mod.pipeline !== "function") throw new Error("Transformers.js did not expose a pipeline() function.");
     const pipeline = mod.pipeline;
     const env = mod.env;
-    if (env) env.allowLocalModels = false;
+    if (env) {
+      env.allowLocalModels = false;
+      // Enable browser cache so second visit is near-instant
+      if ("useBrowserCache" in env) env.useBrowserCache = true;
+      // Some builds need explicit wasm paths handling
+      if (env.backends && env.backends.onnx && env.backends.onnx.wasm) {
+        // Keep default wasmPaths, just toggle proxy per ladder step
+      }
+    }
 
     const errors = [];
     for (const step of deviceLadder()) {
@@ -411,9 +477,6 @@ async function loadDetector(opts = {}) {
 
 /**
  * Coerce a detection score to a 0–1 fraction.
- * transformers.js emits fractions by default but multiplies by 100 when a
- * caller passes `percentage: true`. Accept either rather than silently
- * clamping 91 down to 1 — that bug made every scan look 100% certain.
  */
 function normaliseScore(raw) {
   let s = Number(raw);
@@ -490,49 +553,127 @@ function analyseDetection(det) {
    SCAN FLOW
    ================================================================== */
 function syncScanButton() {
-  const ready = camState === "live" && !scanning;
-  scanButton.disabled = !ready;
-  const span = scanButton.querySelector("span");
+  // FIX: previously disabled for paused/off, so after tab hidden the button
+  // said \"Press Scan Item to restart\" but was disabled — scanner looked broken.
+  const canScan = (camState === "live" || camState === "paused" || camState === "off") && !scanning;
+  if (scanButton) scanButton.disabled = !canScan;
+  const span = scanButton ? scanButton.querySelector("span") : null;
   if (span) {
     span.textContent = scanning ? "Scanning…"
       : (camState === "live" && !detector) ? "Load model & scan"
+      : (camState === "paused" || camState === "off") ? "Restart camera & scan"
       : "Scan Item";
   }
-  // Offer the download as a deliberate choice rather than a surprise mid-scan.
-  if (modelPreload) modelPreload.hidden = !!detector || modelLoading || modelFailed;
+  // FIX: previously hidden when modelFailed, which hid the preload button
+  // exactly when user needed it. Keep it visible unless loading or ready.
+  if (modelPreload) modelPreload.hidden = !!detector || modelLoading;
 }
 
 function captureFrame() {
-  const vw = video.videoWidth || 640;
-  const vh = video.videoHeight || 480;
-  const scale = Math.min(1, 640 / vw);
-  captureCanvas.width = Math.max(1, Math.round(vw * scale));
-  captureCanvas.height = Math.max(1, Math.round(vh * scale));
-  captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-  return captureCanvas.toDataURL("image/jpeg", 0.85);
+  // Use video dimensions if available, else fallback to last known or 640x480
+  const vw = (video && video.videoWidth) ? video.videoWidth : lastCaptureW;
+  const vh = (video && video.videoHeight) ? video.videoHeight : lastCaptureH;
+  const safeW = Math.max(1, vw || 640);
+  const safeH = Math.max(1, vh || 480);
+  const scale = Math.min(1, 640 / safeW);
+  const cw = Math.max(1, Math.round(safeW * scale));
+  const ch = Math.max(1, Math.round(safeH * scale));
+  if (captureCanvas) {
+    captureCanvas.width = cw;
+    captureCanvas.height = ch;
+    if (captureCtx && video) {
+      try {
+        captureCtx.drawImage(video, 0, 0, cw, ch);
+      } catch (e) {
+        console.warn("captureFrame drawImage failed", e);
+      }
+    }
+  }
+  lastCaptureW = cw;
+  lastCaptureH = ch;
+  // Prefer returning the canvas itself for transformers.js (it accepts canvas)
+  // but keep dataURL fallback for compatibility.
+  // The detector can handle HTMLCanvasElement directly, which avoids base64 cost.
+  if (captureCanvas) return captureCanvas;
+  return "";
 }
 
 function clearOverlay() {
   if (!overlayCtx || !overlayCanvas) return;
-  overlayCanvas.width = overlayCanvas.clientWidth || 1;
-  overlayCanvas.height = overlayCanvas.clientHeight || 1;
-  overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  // Use devicePixelRatio for crisp boxes
+  const dpr = window.devicePixelRatio || 1;
+  const w = overlayCanvas.clientWidth || 1;
+  const h = overlayCanvas.clientHeight || 1;
+  overlayCanvas.width = Math.round(w * dpr);
+  overlayCanvas.height = Math.round(h * dpr);
+  overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  overlayCtx.clearRect(0, 0, w, h);
+}
+
+function normalizeBoxToFraction(box) {
+  if (!box) return null;
+  // Test format: {x, y, width, height} where values may be 0-100 percentages
+  if ("x" in box && "width" in box) {
+    let x = Number(box.x) || 0;
+    let y = Number(box.y) || 0;
+    let w = Number(box.width) || 0;
+    let h = Number(box.height) || 0;
+    // Detect if percentages 0-100
+    if (x > 1 || y > 1 || w > 1 || h > 1) {
+      x /= 100; y /= 100; w /= 100; h /= 100;
+    }
+    return { x, y, w, h };
+  }
+  // Real transformers.js format: {xmin, ymin, xmax, ymax}
+  if ("xmin" in box && "xmax" in box) {
+    let xmin = Number(box.xmin) || 0;
+    let ymin = Number(box.ymin) || 0;
+    let xmax = Number(box.xmax) || 0;
+    let ymax = Number(box.ymax) || 0;
+    // If values are normalized 0-1, use directly
+    if (xmax <= 1.01 && ymax <= 1.01 && xmin >= 0 && ymin >= 0 && xmax > xmin && ymax > ymin) {
+      return { x: xmin, y: ymin, w: xmax - xmin, h: ymax - ymin };
+    }
+    // Pixel coordinates: normalize by last capture size
+    const iw = lastCaptureW || 640;
+    const ih = lastCaptureH || 480;
+    // Clamp to avoid negative or huge boxes
+    xmin = Math.max(0, Math.min(iw, xmin));
+    ymin = Math.max(0, Math.min(ih, ymin));
+    xmax = Math.max(0, Math.min(iw, xmax));
+    ymax = Math.max(0, Math.min(ih, ymax));
+    return {
+      x: xmin / iw,
+      y: ymin / ih,
+      w: Math.max(0, (xmax - xmin) / iw),
+      h: Math.max(0, (ymax - ymin) / ih),
+    };
+  }
+  return null;
 }
 
 function drawDetections(dets) {
   if (!overlayCtx || !overlayCanvas) return;
+  const dpr = window.devicePixelRatio || 1;
   const w = overlayCanvas.clientWidth || 1;
   const h = overlayCanvas.clientHeight || 1;
-  overlayCanvas.width = w;
-  overlayCanvas.height = h;
+  // Ensure canvas size matches display size * dpr
+  if (overlayCanvas.width !== Math.round(w * dpr) || overlayCanvas.height !== Math.round(h * dpr)) {
+    overlayCanvas.width = Math.round(w * dpr);
+    overlayCanvas.height = Math.round(h * dpr);
+  }
+  overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   overlayCtx.clearRect(0, 0, w, h);
 
   dets.forEach((d, i) => {
-    const b = d.box || {};
-    const x = ((b.x || 0) / 100) * w;
-    const y = ((b.y || 0) / 100) * h;
-    const bw = ((b.width || 0) / 100) * w;
-    const bh = ((b.height || 0) / 100) * h;
+    const norm = normalizeBoxToFraction(d.box);
+    if (!norm) return;
+    const x = norm.x * w;
+    const y = norm.y * h;
+    const bw = norm.w * w;
+    const bh = norm.h * h;
+    // Skip tiny boxes that are likely noise
+    if (bw < 2 || bh < 2) return;
     const top = i === 0;
     overlayCtx.lineWidth = top ? 3 : 2;
     overlayCtx.strokeStyle = top ? "#ffd23e" : "rgba(255,255,255,.75)";
@@ -560,18 +701,26 @@ function withTimeout(promise, ms, message) {
 async function runScan() {
   if (scanning) return;
 
+  // FIX: previous version returned silently when camState was \"starting\",
+  // so clicking Scan while camera was still initializing did nothing.
   if (camState !== "live") {
-    if (camState === "error" || camState === "paused" || camState === "off") {
-      const started = await ensureCamera();
-      if (!started) {
+    const started = await ensureCamera();
+    if (!started || camState !== "live") {
+      if (camState === "starting") {
+        renderNoVerdict({
+          title: "CAMERA STARTING",
+          meta: "Please wait a moment",
+          body: "The camera is still starting. Wait a second and press Scan again — or use the manual lookup below.",
+        });
+      } else {
         renderNoVerdict({
           title: "CAMERA NOT AVAILABLE",
           meta: "Scan cancelled",
           body: "The scanner needs the camera to identify an item. Use the manual lookup below to find the right bin instead.",
         });
       }
+      return;
     }
-    return;
   }
 
   if (!detector) {
@@ -587,15 +736,13 @@ async function runScan() {
   }
 
   scanning = true;
-  cameraBox.classList.add("scanning");
+  if (cameraBox) cameraBox.classList.add("scanning");
   syncScanButton();
 
   try {
     const frame = captureFrame();
     // NOTE: no `percentage: true`. That option multiplies every score by 100,
-    // which silently collapsed the whole confidence model — analyseDetection
-    // clamps to [0,1], so a 0.91 detection became 1.0 and every scan looked
-    // maximally certain. Scores are fractions here.
+    // which silently collapsed the whole confidence model.
     const outputs = await withTimeout(detector(frame, { threshold: SCAN_THRESHOLD }), SCAN_TIMEOUT_MS, "Inference timed out");
     handleDetections(outputs);
   } catch (err) {
@@ -608,7 +755,7 @@ async function runScan() {
     });
   } finally {
     scanning = false;
-    cameraBox.classList.remove("scanning");
+    if (cameraBox) cameraBox.classList.remove("scanning");
     syncScanButton();
   }
 }
@@ -656,26 +803,27 @@ function sourceLine(srcKey) {
 
 /** A neutral card that never names a bin. Used for every failure mode. */
 function renderNoVerdict({ title, meta, body, also }) {
-  resultEmpty.hidden = true;
-  resultContent.hidden = false;
-  resultContent.innerHTML =
-    '<div class="result-card" data-category="none">' +
-      '<div class="cat-flag">' + icon("question", 16) + " No bin recommendation</div>" +
-      '<div class="cat-title">' + esc(title) + "</div>" +
-      '<div class="cat-meta">' + esc(meta || "") + "</div>" +
-      (body ? '<div class="cat-why"><p>' + esc(body) + "</p></div>" : "") +
-      (also && also.length ? '<div class="cat-also">Also in frame: ' + esc(also.join(" · ")) + "</div>" : "") +
-      '<div class="cat-actions">' +
-        '<button class="btn" type="button" data-action="scan-again">' + icon("scan", 18) + " Scan again</button>" +
-        '<button class="btn" type="button" data-action="go-manual">' + icon("book", 18) + " Check manually</button>" +
-      "</div>" +
-    "</div>";
-  wireResultActions();
+  if (resultEmpty) resultEmpty.hidden = true;
+  if (resultContent) {
+    resultContent.hidden = false;
+    resultContent.innerHTML =
+      '<div class="result-card" data-category="none">' +
+        '<div class="cat-flag">' + icon("question", 16) + " No bin recommendation</div>" +
+        '<div class="cat-title">' + esc(title) + "</div>" +
+        '<div class="cat-meta">' + esc(meta || "") + "</div>" +
+        (body ? '<div class="cat-why"><p>' + esc(body) + "</p></div>" : "") +
+        (also && also.length ? '<div class="cat-also">Also in frame: ' + esc(also.join(" · ")) + "</div>" : "") +
+        '<div class="cat-actions">' +
+          '<button class="btn" type="button" data-action="scan-again">' + icon("scan", 18) + " Scan again</button>" +
+          '<button class="btn" type="button" data-action="go-manual">' + icon("book", 18) + " Check manually</button>" +
+        "</div>" +
+      "</div>";
+    wireResultActions();
+  }
 }
 
 function renderScanResult(a, others) {
   const cat = CATEGORIES[a.category];
-  const isVerdict = !!cat.bin;
   const pctDet = Math.round(a.detectionScore * 100);
   const pctDis = Math.round(a.disposalScore * 100);
 
@@ -738,17 +886,19 @@ function renderScanResult(a, others) {
         : "");
   }
 
-  resultEmpty.hidden = true;
-  resultContent.hidden = false;
-  resultContent.innerHTML =
-    '<div class="result-card" data-category="' + esc(a.category) + '">' + inner +
-      '<div class="cat-actions">' +
-        '<button class="btn" type="button" data-action="scan-again">' + icon("scan", 18) + " Scan again</button>" +
-        '<button class="btn" type="button" data-action="go-manual">' + icon("book", 18) + " Check manually</button>" +
-        '<button class="btn" type="button" data-action="clear-result">Clear</button>' +
-      "</div>" +
-    "</div>";
-  wireResultActions();
+  if (resultEmpty) resultEmpty.hidden = true;
+  if (resultContent) {
+    resultContent.hidden = false;
+    resultContent.innerHTML =
+      '<div class="result-card" data-category="' + esc(a.category) + '">' + inner +
+        '<div class="cat-actions">' +
+          '<button class="btn" type="button" data-action="scan-again">' + icon("scan", 18) + " Scan again</button>" +
+          '<button class="btn" type="button" data-action="go-manual">' + icon("book", 18) + " Check manually</button>" +
+          '<button class="btn" type="button" data-action="clear-result">Clear</button>' +
+        "</div>" +
+      "</div>";
+    wireResultActions();
+  }
 }
 
 function confidenceBar(a) {
@@ -762,6 +912,7 @@ function confidenceBar(a) {
 }
 
 function wireResultActions() {
+  if (!resultContent) return;
   const again = resultContent.querySelector('[data-action="scan-again"]');
   const clear = resultContent.querySelector('[data-action="clear-result"]');
   const manual = resultContent.querySelector('[data-action="go-manual"]');
@@ -778,9 +929,11 @@ function wireResultActions() {
 }
 
 function clearResult() {
-  resultContent.hidden = true;
-  resultContent.innerHTML = "";
-  resultEmpty.hidden = false;
+  if (resultContent) {
+    resultContent.hidden = true;
+    resultContent.innerHTML = "";
+  }
+  if (resultEmpty) resultEmpty.hidden = false;
   clearOverlay();
 }
 
@@ -789,6 +942,7 @@ function clearResult() {
    ================================================================== */
 function buildItemGrid() {
   const grid = $("#item-grid");
+  if (!grid) return;
   grid.innerHTML = ITEMS.map((i) =>
     '<button class="item-tile" data-id="' + esc(i.id) + '" type="button" aria-label="' +
         esc(i.name) + " — goes in the " + esc(BINS[i.bin].name) + " (" + esc(BINS[i.bin].sub) + ')">' +
@@ -810,26 +964,28 @@ function showManualItem(id) {
   const cat = CATEGORIES[category];
   const bin = BINS[item.bin];
 
-  resultEmpty.hidden = true;
-  resultContent.hidden = false;
-  resultContent.innerHTML =
-    '<div class="result-card" data-category="' + esc(category) + '">' +
-      '<div class="cat-flag is-ok">' + icon("check", 16) + " Confirmed from official guidance</div>" +
-      '<div class="cat-title">' + esc(cat.title) + "</div>" +
-      '<div class="cat-meta">Manual lookup: ' + esc(item.name) + "</div>" +
-      '<div class="cat-steps">' +
-        '<div class="step"><span class="step-k">What</span><span class="step-v">' + esc(item.name) + "</span></div>" +
-        '<div class="step"><span class="step-k">Where</span><span class="step-v"><strong>' + esc(bin.name) + "</strong> — " + esc(bin.sub) + "</span></div>" +
-        '<div class="step"><span class="step-k">Why</span><span class="step-v">' + esc(item.why) + "</span></div>" +
-        '<div class="step"><span class="step-k">Science</span><span class="step-v">' + esc(item.science) + "</span></div>" +
-      "</div>" +
-      (item.varies ? '<div class="cat-note">' + esc(item.varies) + "</div>" : "") +
-      sourceLine(item.src) +
-      '<div class="cat-actions">' +
-        '<button class="btn" type="button" data-action="clear-result">Clear</button>' +
-      "</div>" +
-    "</div>";
-  wireResultActions();
+  if (resultEmpty) resultEmpty.hidden = true;
+  if (resultContent) {
+    resultContent.hidden = false;
+    resultContent.innerHTML =
+      '<div class="result-card" data-category="' + esc(category) + '">' +
+        '<div class="cat-flag is-ok">' + icon("check", 16) + " Confirmed from official guidance</div>" +
+        '<div class="cat-title">' + esc(cat.title) + "</div>" +
+        '<div class="cat-meta">Manual lookup: ' + esc(item.name) + "</div>" +
+        '<div class="cat-steps">' +
+          '<div class="step"><span class="step-k">What</span><span class="step-v">' + esc(item.name) + "</span></div>" +
+          '<div class="step"><span class="step-k">Where</span><span class="step-v"><strong>' + esc(bin.name) + "</strong> — " + esc(bin.sub) + "</span></div>" +
+          '<div class="step"><span class="step-k">Why</span><span class="step-v">' + esc(item.why) + "</span></div>" +
+          '<div class="step"><span class="step-k">Science</span><span class="step-v">' + esc(item.science) + "</span></div>" +
+        "</div>" +
+        (item.varies ? '<div class="cat-note">' + esc(item.varies) + "</div>" : "") +
+        sourceLine(item.src) +
+        '<div class="cat-actions">' +
+          '<button class="btn" type="button" data-action="clear-result">Clear</button>' +
+        "</div>" +
+      "</div>";
+    wireResultActions();
+  }
   const panel = $("#result-panel");
   if (panel) panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -839,6 +995,7 @@ function showManualItem(id) {
    ================================================================== */
 function buildLegend() {
   const legend = $("#bin-legend");
+  if (!legend) return;
   const data = [
     { bin: BINS.green, items: ["Food scraps & bones", "Garden prunings", "Tissues & paper towel", "Certified compostables"] },
     { bin: BINS.yellow, items: ["Glass bottles & jars", "Cans & clean tins", "Rigid plastic containers", "Paper & cardboard"] },
@@ -924,6 +1081,7 @@ function shuffle(arr) {
 
 function buildBins() {
   const binsWrap = $("#game-bins");
+  if (!binsWrap) return;
   const household = ["green", "yellow", "blue"];
   binsWrap.innerHTML = household.map((k) =>
     '<div class="g-bin" data-bin="' + k + '" role="button" tabindex="0" aria-label="Sort into ' + esc(BINS[k].name) + ", " + esc(BINS[k].sub) + '">' +
@@ -973,7 +1131,7 @@ function renderRound() {
   wrap.dataset.items = JSON.stringify(gamePool.map((i) => i.id));
   wrap.innerHTML = gamePool.map((i) =>
     '<div class="g-item" draggable="true" data-id="' + esc(i.id) + '" role="button" tabindex="0" ' +
-      'aria-label="' + esc(i.name) + '. Select then choose a bin.">' +
+      'aria-label="' + esc(i.name) + '. Select then choose a bin.\">' +
       icon(i.icon, 26) +
       '<span class="g-name">' + esc(i.name) + "</span>" +
     "</div>"
@@ -1256,7 +1414,7 @@ function downloadFeedback() {
 /* ==================================================================
    WIRE UP
    ================================================================== */
-scanButton.addEventListener("click", runScan);
+if (scanButton) scanButton.addEventListener("click", runScan);
 $$('[data-action="restart"]').forEach((b) => b.addEventListener("click", startGame));
 
 document.addEventListener("visibilitychange", () => {
@@ -1265,7 +1423,6 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => stopStream());
 
 window.addEventListener("resize", () => {
-  // Keep overlay boxes aligned with the video box after a layout change.
   if (camState !== "live") clearOverlay();
 });
 
