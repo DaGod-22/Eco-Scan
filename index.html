@@ -211,11 +211,21 @@
         </div>
 
         <div class="report-grid">
-          <article class="panel report-card">
-            <h2>Introduction</h2>
-            <p>I came up with the idea for <strong>EcoScan SA</strong> because I noticed how often my friends and family stand in front of the school or kitchen bins completely confused about where to throw away their rubbish. Even though South Australia is really good at recycling, a lot of people still make mistakes. They accidentally put things like soft chip packets into the yellow bin, which jams up the sorting machines at our local recycling centres.</p>
-            <p>My project is a mobile website that fixes this problem by making waste sorting easy and fun. I designed an interactive "EcoScan" camera scanner that tells you exactly which household bin an item belongs to according to South Australia's <em>Which Bin</em> rules. I also built a drag-and-drop game to help people practise. The science goal of my site is to teach people <em>why</em> correct sorting matters: when organic food waste goes into the landfill bin it is trapped under piles of rubbish with no air, which creates methane. But if it goes in the green organics bin, it becomes compost for SA farms. I want my app to show that small everyday choices can help save energy and protect our environment.</p>
+          <div class="report-linked">
+          <article class="panel report-card report-main">
+            <h2>Report</h2>
+            <p>I came up with the idea of <strong>EcoScan SA</strong> because I saw people like my grandparents who come from different countries completely clueless about where to put their rubbish, as there are many bins in Australia. Even people who have been living in Australia for a long time though, like me or my parents, also get confused about where to put the rarer things, such as devices, batteries or magnets. This is why I thought of the idea of EcoScan SA.</p>
+            <p>My project is designed to assist people in knowing where to put their rubbish. Be it green bins, red bins or special waste disposal, our scanner covers it all. And if you don&rsquo;t have the image with you, check out our comprehensive database of many waste materials, ranging from greasy pizza boxes to e-waste (such as phones or devices). Aside from our scanner, we also have a fun minigame designed to educate you about waste and where it goes. If you don&rsquo;t know why, at the end of every round, my website educates you about your mistakes and why you were wrong.</p>
+            <p>The philosophy of my site is that it isn&rsquo;t just important to educate people about where they should put their rubbish, but rather to teach them <em>why</em> the correct sorting matters. For example, when organic food waste, such as banana peels, goes to the landfill bin, it gets trapped under piles of trash with no air, which creates a dangerous greenhouse gas called methane (CH<sub>4</sub>). Methane is <strong>80 to 86 times more damaging</strong> than carbon dioxide over its first 20 years in the atmosphere, and still <strong>28 times more damaging</strong> over a 100-year period, meaning that it can negatively affect climate change greatly. But, if the food waste goes into the green organics bin, it gets turned into rich compost or fertiliser for farms, like Jeffries and Peats Soil.</p>
           </article>
+
+          <article class="panel report-card ai-disclosure">
+            <h2>AI Disclosure Statement</h2>
+            <p>This project was created with the assistance of <a href="https://arena.ai" target="_blank" rel="noopener noreferrer">Arena.ai</a>. The AI was used to <strong>generate the site&rsquo;s code, layout and interactive features</strong>, while I (the student author) directed the <strong>logical flow and design</strong> and verified the accuracy of the science data and bin-sorting rules against the South Australian sources listed below.</p>
+            <p>The object detection runs in the browser using Hugging Face Transformers.js and the <code>Xenova/detr-resnet-50</code> model. No image ever leaves the device. The model&rsquo;s outputs are treated as a starting point, not as an authority: every disposal rule the app states comes from a listed South Australian source, and the scanner is designed to say &ldquo;uncertain&rdquo; rather than to guess.</p>
+          </article>
+          </div>
+
 
           <article class="panel report-card">
             <h2>What the scanner can and cannot do</h2>
@@ -259,6 +269,11 @@
                 <span class="log-date">Accuracy &amp; credibility pass</span>
                 <p>Prompt: <em>"Make it substantially more accurate, reliable, polished, educational and competition-ready."</em> Rebuilt the scanner as a layered pipeline that separates object recognition from material inference from the disposal decision; introduced a disposal confidence distinct from detection confidence, with an explicit "AI identification is uncertain" state; corrected the South Australian rules for crockery, glassware and cutlery; expanded the manual lookup to 34 sourced items; replaced every unsourced science figure with an attributed one and replaced the stub bibliography with 15 real sources; added What/Where/Why/Science structure to every result, teaching feedback in the game, and a local-only feedback tool.</p>
               </div>
+              <div class="log-entry">
+                <span class="log-version">v2.2</span>
+                <span class="log-date">Report &amp; model loading</span>
+                <p>Replaced the generated introduction with my own report, and moved the AI disclosure statement directly underneath it so the two read as one document while staying separate. Corrected the methane figures to 80&ndash;86&times; over 20 years and 28&times; over 100 years. Fixed two scanner defects: the recovery ladder was escalating to model files of 80&nbsp;MB and 159&nbsp;MB after failing to load the 41&nbsp;MB one, and detection scores were being multiplied by 100 and then clamped to 1.0, which made every scan look maximally certain. Moved the test suite into <code>tests/</code> so it ships with the project.</p>
+              </div>
             </div>
           </article>
 
@@ -298,11 +313,6 @@
             <ul class="fb-list" id="feedback-list"></ul>
           </article>
 
-          <article class="panel report-card ai-disclosure">
-            <h2>AI Disclosure Statement</h2>
-            <p>This project was created with the assistance of <a href="https://arena.ai" target="_blank" rel="noopener noreferrer">Arena.ai</a>. The AI was used to <strong>generate the site's code, layout and interactive features</strong>, while I (the student author) directed the <strong>logical flow and design</strong> and verified the accuracy of the science data and bin-sorting rules against the South Australian sources listed below.</p>
-            <p>The object detection runs in the browser using Hugging Face Transformers.js and the <code>Xenova/detr-resnet-50</code> model. No image ever leaves the device. The model's outputs are treated as a starting point, not as an authority: every disposal rule the app states comes from a listed South Australian source, and the scanner is designed to say "uncertain" rather than to guess.</p>
-          </article>
         </div>
 
         <div class="section">

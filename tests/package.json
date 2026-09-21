@@ -1,0 +1,10 @@
+{
+  "name": "ecoscan-sa-tests",
+  "private": true,
+  "type": "module",
+  "description": "jsdom functional tests for EcoScan SA — loads the real index.html and app.js.",
+  "scripts": {
+    "test": "node build.mjs && node verify.mjs"
+  },
+  "devDependencies": { "jsdom": "^25.0.0" }
+}

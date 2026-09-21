@@ -473,7 +473,7 @@ export const ITEMS = [
     science: "Composted with oxygen, microbes turn food into stable humus. The same food buried in landfill goes anaerobic within about a year and becomes landfill gas, roughly half of which is methane." },
   { id: "banana", name: "Banana Peel", icon: "banana", bin: "green", src: "goolwa",
     why: "Fruit and vegetable scraps belong in the green bin. In landfill they rot without oxygen and release methane instead of becoming soil.",
-    science: "Methane's 100-year global warming potential is about 28 times that of CO₂ on the IPCC AR5 scale; over 20 years the same gas is roughly 80 times more potent." },
+    science: "Methane's 100-year global warming potential is about 28 times that of CO₂ on the IPCC AR5 scale; over the first 20 years the same gas is roughly 80 to 86 times more potent." },
   { id: "papertowel", name: "Tissues & Paper Towel", icon: "scroll", bin: "green", src: "adelaideaz",
     why: "Most SA councils accept tissues and paper towel in the green organics bin. They are usually too soiled and their fibres too short to recycle.",
     science: "Recycling paper needs long, clean cellulose fibres. Tissue is made from deliberately short fibres and is usually contaminated, so composting recovers its carbon value instead.",
@@ -587,7 +587,7 @@ export const GAME_ITEMS = ITEMS.filter((i) => i.bin !== "hazwaste");
    ------------------------------------------------------------------ */
 export const SCIENCE_FACTS = [
   { num: "≈28×", label: "Methane vs CO₂ (100 years)", src: "epa-lfg",
-    body: "Methane traps about 28 times more heat than the same mass of CO₂ over 100 years on the IPCC AR5 scale. The IPCC's Sixth Assessment gives roughly 27–28 for biogenic methane such as landfill gas, and about 80× over 20 years — the number depends on the time window you choose." },
+    body: "Methane traps about 28 times more heat than the same mass of CO₂ over 100 years on the IPCC AR5 scale. The IPCC's Sixth Assessment gives roughly 27–28 for biogenic methane such as landfill gas, and about 80–86× over 20 years — the exact figure depends on the time window and the assessment report." },
   { num: "50%", label: "Methane in landfill gas", src: "epa-lfg",
     body: "Landfill gas is roughly half methane and half carbon dioxide, with trace amounts of other compounds. It starts forming once oxygen in the waste is used up, typically within about a year of burial." },
   { num: "95%", label: "Energy saved recycling aluminium", src: "iai",
@@ -611,7 +611,7 @@ export const SCIENCE_BLOCKS = [
         heading: "In landfill — no oxygen",
         badge: "Anaerobic decomposition",
         body: "Waste is compacted and buried, so oxygen runs out — typically within about a year. Methanogenic archaea then take over and produce landfill gas, which is roughly half methane and half carbon dioxide.",
-        note: "Methane's 100-year global warming potential is about 28× CO₂ on the IPCC AR5 scale, and roughly 80× over 20 years.",
+        note: "Methane's 100-year global warming potential is about 28× CO₂ on the IPCC AR5 scale, and roughly 80–86× over 20 years.",
         src: "epa-lfg",
       },
       {

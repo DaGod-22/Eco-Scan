@@ -1047,3 +1047,32 @@ code { font-size: .84em; background: rgba(26,26,26,.07); padding: 1px 4px; borde
 [hidden] { display: none !important; }
 .model-note { font-size: .74rem; line-height: 1.45; color: var(--ink-soft); margin: 9px 0 0; }
 #model-preload { width: 100%; margin-top: 10px; justify-content: center; }
+
+/* v2.2 — Report + AI disclosure: joined by a thread, but still two boxes.
+   Dashed rather than solid so the link reads as "belongs to", not "is part of". */
+.report-linked { display: grid; grid-template-columns: 1fr; }
+.report-linked > .report-main { margin-bottom: 30px; }
+.report-linked > .ai-disclosure { position: relative; border-top: 4px solid var(--brand); }
+.report-linked > .ai-disclosure::before {
+  content: "";
+  position: absolute;
+  left: 27px;
+  top: -30px;
+  height: 30px;
+  width: 0;
+  border-left: 2px dashed var(--ink);
+  opacity: .5;
+}
+.report-linked > .ai-disclosure::after {
+  content: "";
+  position: absolute;
+  left: 22px;
+  top: -12px;
+  width: 10px;
+  height: 10px;
+  background: var(--brand);
+  border: 1.5px solid var(--ink);
+}
+@media (min-width: 720px) and (min-height: 480px) {
+  .report-linked { grid-column: 1 / -1; }
+}

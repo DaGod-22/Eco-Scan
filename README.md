@@ -138,11 +138,22 @@ The camera is released when you leave the Scan tab and when the tab is hidden.
 
 ## Testing
 
-A jsdom harness loads the real `index.html` and `app.js` against a stubbed ONNX runtime
-and a switchable `getUserMedia`. It runs **114 assertions** covering label coverage, the
-confidence model, uncertain-result handling, SA rule correctness, manual lookup,
-references, the game, every camera failure mode, model-failure recovery, the download
-ladder, the feedback form, navigation and accessibility attributes.
+The suite lives in `tests/` and loads the real `index.html` and `app.js` against a
+stubbed ONNX runtime and a switchable `getUserMedia`.
+
+```bash
+cd tests && npm install && npm test
+```
+
+It runs **129 assertions** covering label coverage, the confidence model,
+uncertain-result handling, SA rule correctness, manual lookup, references, the game,
+every camera failure mode, model-failure recovery, the download ladder, the feedback
+form, the report page structure, navigation and accessibility attributes.
+
+`tests/build.mjs` regenerates `tests/app-under-test.mjs` from `../app.js` on every run
+and fails if an expected function is missing, so the tests cannot silently drift away
+from the shipped code. The only things it patches are the CDN URL (to the local stub)
+and the `data.js` import path.
 
 Two of those assertions exist because of bugs the earlier suite missed: the detector must
 not be called with `percentage: true` (which multiplied every score by 100 and, after
