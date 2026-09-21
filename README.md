@@ -11,9 +11,13 @@ sorting game, and a science hub explaining decomposition and the circular econom
   detection with [Hugging Face Transformers.js](https://huggingface.co/docs/transformers.js)
   (model: `Xenova/detr-resnet-50`). Detected objects are classified against SA bin rules:
   - Green organics bin — food and biological matter
-  - Yellow recycling bin — rigid containers (bottles, cans, cups)
-  - Specialised drop-off — e-waste
-  - Blue landfill bin — everything else / uncertain
+  - Yellow recycling bin — glass bottles/jars, rigid plastic bottles, clean paper
+  - Specialised drop-off — e-waste and appliances
+  - Blue landfill bin — crockery, drinking glasses, soft plastics, mixed materials
+  - No verdict — items that aren't waste, unrecognised labels, no detection and scan
+    errors are reported as such and never presented as a bin instruction
+- **Detection boxes** — every detection above the threshold is drawn on the live video,
+  and secondary detections are listed in the result.
 - **Manual lookup** — a fallback list of common items with exact bin answers (no camera/model needed).
 - **Waste Sorting Mini-Game** — drag-and-drop (or tap-to-sort) quiz with scoring.
 - **Science Hub** — decomposition (methane vs. compost) and the circular economy.
@@ -43,9 +47,25 @@ entirely in the user's browser.
 
 ## Notes
 
-- The object-detection model (`Xenova/detr-resnet-50`, ~40 MB of quantized ONNX weights) is
-  downloaded on first use and cached by the browser for subsequent sessions.
+- **Download size.** The scanner is lazy-loaded: nothing is fetched until you press
+  *Scan Item* the first time. That first scan downloads roughly **65 MB**:
+
+  | File | Size |
+  | --- | --- |
+  | `model_quantized.onnx` (q8 weights) | 41.1 MiB |
+  | `ort-wasm-simd-threaded.jsep.wasm` (ONNX Runtime) | 22.8 MiB |
+  | `transformers.web.min.js` | 0.4 MiB |
+
+  All of it is cached by the browser, so later visits start instantly. Visitors who only
+  use the manual lookup, game or science hub download none of it.
+- **Backends.** The model loads on CPU/WASM (quantised) by default, with an automatic
+  fallback ladder to WebGPU and then to fp32 if a backend fails. WASM inference runs in a
+  worker thread so the page stays responsive while scanning.
+- **Model coverage.** The detector is COCO-trained, so it recognises 90 object classes.
+  All 90 are mapped to a South Australian bin rule in `LABEL_MAP` (`app.js`); anything
+  unexpected is reported as unrecognised rather than being defaulted to landfill.
 - Camera access requires a secure context (HTTPS) — this is automatic on Vercel/Cloudflare.
+  The camera is released when you leave the Scan tab and when the tab is hidden.
 - For ambiguous results, the app clearly labels outputs as AI-assisted estimates and reminds
   users to check the official "Which Bin" rules.
 

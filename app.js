@@ -14,6 +14,8 @@ const ICONS = {
   alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>',
+  question: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  cameraOff: '<line x1="2" y1="2" x2="22" y2="22"/><path d="M10.66 6H14a2 2 0 0 1 2 2v2.5l5.248-3.062A.5.5 0 0 1 22 7.87v8.196"/><path d="M16 16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/>',
 
   pizza: '<path d="M15 11h.01"/><path d="M11 15h.01"/><path d="M16 16h.01"/><path d="m2 16 20 6-6-20A20 20 0 0 0 2 16"/><path d="M5.71 17.11a17.04 17.04 0 0 1 11.4-11.4"/>',
   banana: '<path d="M4 13c4-5.5 8-5.5 14-5 1.2.06 2.2.2 3 .4-1 6.5-5.5 12.6-11 12.6-2.5 0-4.5-2-4.5-3.5 0-1.2 1.2-1.8 1.8-2.4C6.5 14.8 4 14 4 13Z"/>',
@@ -56,7 +58,7 @@ const ITEMS = [
   { id: "can", name: "Aluminium Can", icon: "can", bin: "yellow", why: "Aluminium is infinitely recyclable. Recycling one can saves about 95% of the energy needed to mine and refine brand-new aluminium." },
   { id: "bottle", name: "Plastic Bottle (clean)", icon: "bottle", bin: "yellow", why: "Clean PET bottles are melted down and re-formed into new products, saving oil and about 88% of the energy. Rinse it and keep the lid on." },
   { id: "cardboard", name: "Clean Cardboard Box", icon: "box", bin: "yellow", why: "Clean, flat cardboard is one of the easiest materials to recycle — it becomes new cardboard, saving trees, water and energy." },
-  { id: "glassjar", name: "Glass Jar / Bottle", icon: "jar", bin: "yellow", why: "Glass jars and bottles are recycled in SA and melted into new glass. (Drinking glasses and window glass are a different type and can't be recycled.)" },
+  { id: "glassjar", name: "Glass Jar / Bottle", icon: "jar", bin: "yellow", why: "Whole, unbroken glass jars and bottles are accepted in South Australia's yellow bin and are melted into new glass. (Drinking glasses and window glass are a different type and can't be recycled.)" },
   { id: "milk", name: "Milk / Juice Carton", icon: "milk", bin: "yellow", why: "Cartons are made of layered paperboard, plastic and sometimes aluminium — South Australia's facilities can separate and recycle these layers." },
   { id: "breadbag", name: "Soft Plastic Bread Bag", icon: "bread", bin: "blue", why: "Soft plastics jam the spinning sorting machinery at recycling facilities, so they must go to landfill (or a specialised drop-off)." },
   { id: "chips", name: "Chip Packet", icon: "scroll", bin: "blue", why: "The shiny foil-plastic layers can't be separated economically, and like all soft plastics they tangle the sorting machines — so they go to landfill." },
@@ -70,42 +72,126 @@ const GAME_ITEMS = ITEMS.filter((i) => i.bin !== "hazwaste");
 const BIN_TO_CATEGORY = { green: "organics", yellow: "recycling", blue: "landfill", hazwaste: "ewaste" };
 
 /* ------------------------------------------------------------------
-   AI CLASSIFICATION (deterministic, expandable)
+   AI CLASSIFICATION
+
+   DETR-resnet-50 emits COCO-91 labels (90 usable). Every one of them is
+   mapped below so nothing silently falls through to "landfill".
+   Rules follow South Australia's "Which Bin" guidance:
+     - Only glass BOTTLES and JARS are yellow; crockery, drinking glasses,
+       mirrors and window glass are landfill.
+     - Anything with a plug or battery is a specialised drop-off.
+     - Food and garden matter is green (FOGO).
    ------------------------------------------------------------------ */
-const WASTE_LABELS = {
-  organics: ["apple", "banana", "orange", "broccoli", "carrot", "sandwich", "pizza", "cake", "donut", "hot dog", "potted plant", "bowl of food", "food"],
-  recycling: ["bottle", "wine glass", "cup", "bowl", "vase", "spoon", "fork", "knife"],
-  ewaste: ["cell phone", "laptop", "tv", "television", "remote", "keyboard", "mouse", "computer", "monitor"],
+const LABEL_MAP = {
+  // ---- Green organics (FOGO) ----
+  banana: "organics", apple: "organics", orange: "organics", broccoli: "organics",
+  carrot: "organics", sandwich: "organics", pizza: "organics", donut: "organics",
+  cake: "organics", "hot dog": "organics", "potted plant": "organics",
+
+  // ---- Yellow recycling (rigid containers / paper) ----
+  bottle: "recycling", book: "recycling",
+
+  // ---- Specialised drop-off (e-waste / appliances / batteries) ----
+  "cell phone": "ewaste", laptop: "ewaste", tv: "ewaste", remote: "ewaste",
+  keyboard: "ewaste", mouse: "ewaste", microwave: "ewaste", oven: "ewaste",
+  toaster: "ewaste", refrigerator: "ewaste", blender: "ewaste", "hair drier": "ewaste",
+
+  // ---- Blue landfill (explicit, with reasons) ----
+  "wine glass": "landfill", cup: "landfill", bowl: "landfill", plate: "landfill",
+  vase: "landfill", spoon: "landfill", fork: "landfill", knife: "landfill",
+  mirror: "landfill", window: "landfill", scissors: "landfill", toothbrush: "landfill",
+  "teddy bear": "landfill", backpack: "landfill", handbag: "landfill", suitcase: "landfill",
+  shoe: "landfill", hat: "landfill", tie: "landfill", umbrella: "landfill",
+  frisbee: "landfill", skis: "landfill", snowboard: "landfill", skateboard: "landfill",
+  surfboard: "landfill", "sports ball": "landfill", "baseball bat": "landfill",
+  "baseball glove": "landfill", "tennis racket": "landfill", kite: "landfill",
+  chair: "landfill", couch: "landfill", bed: "landfill", desk: "landfill",
+  "dining table": "landfill", bench: "landfill", door: "landfill", sink: "landfill",
+  toilet: "landfill", clock: "landfill", "eye glasses": "landfill",
+
+  // ---- Not a disposable item — the model found something that isn't waste ----
+  person: "notwaste", bird: "notwaste", cat: "notwaste", dog: "notwaste",
+  horse: "notwaste", sheep: "notwaste", cow: "notwaste", elephant: "notwaste",
+  bear: "notwaste", zebra: "notwaste", giraffe: "notwaste", bicycle: "notwaste",
+  car: "notwaste", motorcycle: "notwaste", airplane: "notwaste", bus: "notwaste",
+  train: "notwaste", truck: "notwaste", boat: "notwaste", "traffic light": "notwaste",
+  "fire hydrant": "notwaste", "street sign": "notwaste", "stop sign": "notwaste",
+  "parking meter": "notwaste",
+};
+
+// Per-label extras for items where the category alone is misleading.
+const LABEL_NOTES = {
+  "potted plant": "Only the plant goes in the green bin — take the plastic or terracotta pot out first; pots go to landfill.",
+  "wine glass": "Drinking glasses are a different glass to bottles and jars, so they can't go in the yellow bin in South Australia.",
+  cup: "Ceramic mugs and paper or polystyrene cups are landfill. Only rigid plastic containers and glass bottles/jars are yellow.",
+  bowl: "Crockery weakens recycled glass, so bowls go to landfill — not the yellow bin.",
+  plate: "Crockery like plates and mugs — broken or not — cannot go in South Australia's yellow recycling bin.",
+  vase: "Glass vases and décor are not container glass, so they can't be recycled with bottles and jars.",
+  spoon: "Cutlery isn't packaging and can't be sorted at the recycling facility — it goes to landfill.",
+  fork: "Cutlery isn't packaging and can't be sorted at the recycling facility — it goes to landfill.",
+  knife: "Cutlery isn't packaging and can't be sorted at the recycling facility — it goes to landfill. Wrap blades safely.",
+  mirror: "Mirrors are not recyclable through the yellow bin in South Australia — wrap broken pieces and bin them.",
+  window: "Window glass is a different composition to container glass and can't go in the yellow bin.",
+  clock: "Take the battery out first — batteries must never go in a household bin. Drop it at a B-cycle point.",
+  bottle: "Empty and rinse it. Glass bottles and jars, and rigid plastic bottles, are accepted in the yellow bin.",
+  book: "Paper is accepted in the yellow bin. For hardbacks, remove the cover and binding first.",
+  refrigerator: "Whitegoods are collected separately — book a hard-waste pickup or take it to an e-waste drop-off.",
+  oven: "Whitegoods are collected separately — book a hard-waste pickup or take it to an e-waste drop-off.",
+  microwave: "Appliances must not go in a household bin — take it to an e-waste drop-off or retailer collection point.",
+  toaster: "Appliances must not go in a household bin — take it to an e-waste drop-off or retailer collection point.",
+  blender: "Appliances must not go in a household bin — take it to an e-waste drop-off or retailer collection point.",
+  "hair drier": "Appliances must not go in a household bin — take it to an e-waste drop-off or retailer collection point.",
+  "cell phone": "Phones contain batteries — never bin them. Most retailers and B-cycle points take them for free.",
 };
 
 const CATEGORY_INFO = {
   organics: {
     title: "GREEN ORGANICS BIN",
+    bin: "green",
     explanation: "Food and biological matter belongs in the green organics bin. Composting with oxygen turns it into rich soil — instead of rotting in landfill and releasing methane, a greenhouse gas 28× stronger than CO₂.",
   },
   recycling: {
     title: "YELLOW RECYCLING BIN",
-    explanation: "Rigid containers like bottles and cans are recyclable. Empty them, rinse lightly, and keep lids on so they can be sorted and re-made into new products — saving energy and resources.",
+    bin: "yellow",
+    explanation: "Rigid containers and clean paper are recyclable. Empty them, rinse lightly, and keep lids on so they can be sorted and re-made into new products — saving energy and resources.",
   },
   ewaste: {
     title: "SPECIALISED DROP-OFF ONLY",
-    explanation: "Electronics contain hazardous components such as batteries, circuit boards and heavy metals, and must not go in any household bin. Take them to a dedicated e-waste drop-off or retailer collection point.",
+    bin: "hazwaste",
+    explanation: "Electronics and appliances contain hazardous components such as batteries, circuit boards and heavy metals, and must not go in any household bin. Take them to a dedicated e-waste drop-off or retailer collection point.",
   },
   landfill: {
     title: "BLUE LANDFILL BIN",
-    explanation: "Mixed-material or soft-plastic items can interfere with local sorting systems and jam recycling machinery. When uncertain, place them in the blue landfill bin — or check a specialised drop-off.",
+    bin: "blue",
+    explanation: "This material can't be processed by South Australia's kerbside recycling. It goes in the blue (or red) landfill bin — wrap anything sharp or breakable in paper first.",
+  },
+  notwaste: {
+    title: "NOT A WASTE ITEM",
+    bin: null,
+    explanation: "The scanner recognised something that isn't a disposable item. Point the camera at a single piece of waste, fill the frame with it, and try again.",
+  },
+  none: {
+    title: "NO RESULT",
+    bin: null,
+    explanation: "",
   },
 };
 
 const UNCERTAINTY_NOTE = "AI-assisted identification — results are an estimate. For ambiguous materials, check the official Which Bin rules before disposing.";
 
+/**
+ * Map a model label to a waste category.
+ * Every COCO-91 label is present in LABEL_MAP; anything unexpected is
+ * reported as "none" (no verdict) rather than silently becoming landfill.
+ */
 function classify(label) {
   const l = (label || "").toLowerCase().trim();
-  if (!l) return "landfill";
-  if (WASTE_LABELS.organics.includes(l)) return "organics";
-  if (WASTE_LABELS.recycling.includes(l)) return "recycling";
-  if (WASTE_LABELS.ewaste.includes(l)) return "ewaste";
-  return "landfill";
+  // hasOwnProperty so labels like "constructor" can't hit Object.prototype.
+  if (!l || !Object.prototype.hasOwnProperty.call(LABEL_MAP, l)) {
+    return { category: "none", note: null, known: false };
+  }
+  const category = LABEL_MAP[l];
+  return { category, note: LABEL_NOTES[l] || null, known: true };
 }
 
 /* ------------------------------------------------------------------
@@ -114,8 +200,11 @@ function classify(label) {
 let cameraStream = null;
 let detector = null;
 let modelLoading = false;
+let modelFailed = false;
+let modelBackend = null; // description of the backend that actually worked
 let camState = "starting"; // starting | live | error | paused
 let scanning = false;
+let scanAbort = null;
 
 let gameScore = 0;
 let answered = 0;
@@ -130,6 +219,8 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const video = $("#webcam");
 const captureCanvas = $("#capture");
 const captureCtx = captureCanvas.getContext("2d", { willReadFrequently: true });
+const overlayCanvas = $("#overlay");
+const overlayCtx = overlayCanvas.getContext("2d");
 const cameraBox = $("#camera");
 const camDot = $("#cam-dot");
 const camStatus = $("#cam-status");
@@ -180,6 +271,10 @@ function setCamState(state, message) {
     camStatus.textContent = "paused";
     cameraState.innerHTML = '<p>Camera paused. Return to the Scan tab to resume.</p>';
     video.classList.remove("active");
+  } else if (state === "off") {
+    camStatus.textContent = "off";
+    cameraState.innerHTML = '<p>Camera released while the tab was hidden. Press Scan Item to restart it.</p>';
+    video.classList.remove("active");
   } else {
     camStatus.textContent = "starting";
     cameraState.innerHTML = "<p>Requesting camera access…</p>";
@@ -201,25 +296,43 @@ async function startCamera() {
   setCamState("starting");
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     setCamState("error", "This browser does not support camera access. Use the manual lookup below.");
-    return;
+    return false;
   }
   try {
     stopStream(); // release any existing stream first
-    cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
-      audio: false,
-    });
+    let stream;
+    try {
+      // "ideal" so a device with only a front camera still works.
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+    } catch (constraintErr) {
+      if (constraintErr && constraintErr.name === "OverconstrainedError") {
+        // Retry with no constraints at all before giving up.
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      } else {
+        throw constraintErr;
+      }
+    }
+    cameraStream = stream;
     video.srcObject = cameraStream;
     await video.play();
     setCamState("live");
+    return true;
   } catch (err) {
     let msg = "Camera access was denied or unavailable. Use the manual lookup below.";
     if (err && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
       msg = "Camera permission was blocked. Allow camera access in your browser and try again — or use the manual lookup below.";
     } else if (err && err.name === "NotFoundError") {
       msg = "No camera was found on this device. Use the manual lookup below.";
+    } else if (err && err.name === "NotReadableError") {
+      msg = "Another app is already using the camera. Close it and try again — or use the manual lookup below.";
+    } else if (err && err.name === "OverconstrainedError") {
+      msg = "This device's camera does not support the requested settings. Use the manual lookup below.";
     }
     setCamState("error", msg);
+    return false;
   }
 }
 
@@ -231,28 +344,45 @@ function stopStream() {
   if (video.srcObject) {
     video.srcObject = null;
   }
+  clearOverlay();
 }
 
+/** Release the camera. mode: "paused" (resumable) or "off" (fully released). */
 function stopCamera(mode) {
-  if (mode === "paused") {
-    stopStream();
-    setCamState("paused");
-  }
+  if (mode !== "paused" && mode !== "off") mode = "paused";
+  stopStream();
+  setCamState(mode);
 }
 
 function ensureCamera() {
-  if (camState === "live") return;
-  if (camState === "starting") return;
-  startCamera();
+  if (camState === "live" || camState === "starting") return Promise.resolve(camState === "live");
+  return startCamera();
 }
 
 /* ------------------------------------------------------------------
    MODEL (Transformers.js)
    ------------------------------------------------------------------ */
-const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/dist/transformers.web.js";
+const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/dist/transformers.web.min.js";
 const MODEL_ID = "Xenova/detr-resnet-50";
 
+/**
+ * Genuine fallback ladder — each entry really is a different configuration,
+ * so a failure in one step is not simply repeated in the next.
+ */
+function deviceLadder() {
+  const ladder = [
+    { label: "CPU · WASM · quantised", opts: { device: "wasm", dtype: "q8" }, proxy: true },
+    { label: "CPU · WASM · quantised", opts: { device: "wasm", dtype: "q8" }, proxy: false },
+  ];
+  if (typeof navigator !== "undefined" && navigator.gpu) {
+    ladder.push({ label: "GPU · WebGPU", opts: { device: "webgpu", dtype: "fp16" }, proxy: false });
+  }
+  ladder.push({ label: "CPU · WASM · fp32", opts: { device: "wasm", dtype: "fp32" }, proxy: false });
+  return ladder;
+}
+
 function setModelLoading(text, pct) {
+  modelFailed = false;
   modelState.classList.remove("ready", "error");
   modelText.textContent = text || "Loading AI model…";
   modelPct.textContent = pct != null ? pct + "%" : "";
@@ -261,59 +391,90 @@ function setModelLoading(text, pct) {
 }
 
 function setModelReady() {
+  modelFailed = false;
   modelState.classList.add("ready");
   modelState.classList.remove("error");
-  modelText.textContent = "AI model ready";
+  modelText.textContent = modelBackend ? "AI model ready · " + modelBackend : "AI model ready";
   modelPct.textContent = "";
   modelProgress.style.width = "100%";
+  modelState.querySelectorAll(".model-retry").forEach((n) => n.remove());
   syncScanButton();
 }
 
 function setModelError(msg) {
+  modelFailed = true;
   modelState.classList.add("error");
   modelState.classList.remove("ready");
   modelText.textContent = msg || "Could not load the AI model.";
   modelPct.textContent = "";
+  modelProgress.style.width = "0%";
+
+  // Always give the user a way back — previously this was a dead end.
+  if (!modelState.querySelector(".model-retry")) {
+    const row = modelState.querySelector(".model-row");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-ghost btn-sm model-retry";
+    btn.innerHTML = icon("refresh", 16) + " Retry";
+    btn.addEventListener("click", () => loadDetector({ force: true }));
+    if (row) row.parentNode.insertBefore(btn, row.nextSibling);
+    else modelState.appendChild(btn);
+  }
   syncScanButton();
 }
 
-async function loadDetector() {
-  if (detector) return detector;
+async function loadDetector(opts = {}) {
+  if (detector && !opts.force) return detector;
   if (modelLoading) return null;
   modelLoading = true;
+  modelFailed = false;
 
   try {
     setModelLoading("Loading AI engine…", 0);
     const mod = await import(TRANSFORMERS_URL);
     const pipeline = mod.pipeline;
+    const env = mod.env;
 
-    const makePipeline = (opts) =>
-      pipeline("object-detection", MODEL_ID, {
-        ...opts,
-        progress_callback: (p) => {
-          if (!p) return;
-          if (p.status === "progress") {
-            const pct = Math.max(0, Math.min(100, Math.round(p.progress || 0)));
-            setModelLoading("Downloading model…", pct);
-          } else if (p.status === "done") {
-            setModelLoading("Finalising model…", 100);
-          } else if (p.status === "ready") {
-            setModelReady();
-          }
-        },
-      });
+    // Never look for local model files in a browser deployment.
+    if (env) env.allowLocalModels = false;
 
-    try {
-      detector = await makePipeline({});
-    } catch (e) {
-      // Fall back to WASM if the default device (e.g. WebGPU) failed.
-      detector = await makePipeline({ device: "wasm" });
+    const ladder = deviceLadder();
+    const errors = [];
+
+    for (const step of ladder) {
+      setModelLoading("Loading AI engine · " + step.label + "…", 0);
+      if (env && env.backends && env.backends.onnx && env.backends.onnx.wasm) {
+        // Run inference in a worker so the page stays responsive.
+        env.backends.onnx.wasm.proxy = !!step.proxy;
+      }
+      try {
+        detector = await pipeline("object-detection", MODEL_ID, {
+          ...step.opts,
+          progress_callback: (p) => {
+            if (!p) return;
+            if (p.status === "progress") {
+              const pct = Math.max(0, Math.min(100, Math.round(p.progress || 0)));
+              setModelLoading("Downloading model · " + step.label + "…", pct);
+            } else if (p.status === "done") {
+              setModelLoading("Finalising model · " + step.label + "…", 100);
+            }
+          },
+        });
+        modelBackend = step.label + (step.proxy ? " · threaded" : "");
+        setModelReady();
+        return detector;
+      } catch (stepErr) {
+        console.warn("Model backend failed (" + step.label + ", proxy=" + step.proxy + "):", stepErr);
+        errors.push(step.label + (step.proxy ? " (threaded)" : "") + ": " + (stepErr && stepErr.message ? stepErr.message : stepErr));
+        detector = null;
+      }
     }
-    setModelReady();
-    return detector;
+
+    throw new Error(errors.join(" | ") || "All model backends failed.");
   } catch (err) {
     console.error("Model load failed:", err);
-    setModelError("Could not load the AI model. Manual lookup still works.");
+    detector = null;
+    setModelError("Could not load the AI model. Check your connection and retry — the manual lookup below still works.");
     return null;
   } finally {
     modelLoading = false;
@@ -324,9 +485,14 @@ async function loadDetector() {
    SCAN FLOW
    ------------------------------------------------------------------ */
 function syncScanButton() {
-  const ready = camState === "live" && !!detector && !scanning;
+  // Enabled whenever the camera is live: if the model is missing, clicking
+  // (re)loads it instead of being permanently disabled.
+  const ready = camState === "live" && !scanning;
   scanButton.disabled = !ready;
-  scanButton.querySelector("span").textContent = scanning ? "Scanning…" : "Scan Item";
+  const span = scanButton.querySelector("span");
+  if (span) {
+    span.textContent = scanning ? "Scanning…" : camState === "live" && !detector ? "Load model & scan" : "Scan Item";
+  }
 }
 
 function captureFrame() {
@@ -340,15 +506,76 @@ function captureFrame() {
   return captureCanvas.toDataURL("image/jpeg", 0.85);
 }
 
+function clearOverlay() {
+  if (!overlayCtx || !overlayCanvas) return;
+  overlayCanvas.width = overlayCanvas.clientWidth || 1;
+  overlayCanvas.height = overlayCanvas.clientHeight || 1;
+  overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+}
+
+/** Draw every detection above the threshold, scaled to the video box. */
+function drawDetections(dets) {
+  if (!overlayCtx || !overlayCanvas) return;
+  const w = overlayCanvas.clientWidth || 1;
+  const h = overlayCanvas.clientHeight || 1;
+  overlayCanvas.width = w;
+  overlayCanvas.height = h;
+  overlayCtx.clearRect(0, 0, w, h);
+
+  dets.forEach((d) => {
+    const b = d.box || {};
+    // percentage:true gives 0-100 coordinates
+    const x = (b.x / 100) * w;
+    const y = (b.y / 100) * h;
+    const bw = (b.width / 100) * w;
+    const bh = (b.height / 100) * h;
+    const top = d === dets[0];
+    overlayCtx.lineWidth = top ? 3 : 2;
+    overlayCtx.strokeStyle = top ? "#ffd23e" : "rgba(255,255,255,.75)";
+    overlayCtx.strokeRect(x, y, bw, bh);
+
+    const text = d.label + " " + Math.round((d.score || 0) * 100) + "%";
+    overlayCtx.font = "600 12px system-ui, sans-serif";
+    const tw = overlayCtx.measureText(text).width + 10;
+    const ty = Math.max(0, y - 18);
+    overlayCtx.fillStyle = top ? "#ffd23e" : "rgba(20,22,20,.85)";
+    overlayCtx.fillRect(x, ty, tw, 18);
+    overlayCtx.fillStyle = top ? "#1A1A1A" : "#fff";
+    overlayCtx.fillText(text, x + 5, ty + 13);
+  });
+}
+
 async function runScan() {
   if (scanning) return;
+
+  // Give visible feedback instead of silently doing nothing.
   if (camState !== "live") {
-    if (camState === "error" || camState === "paused") ensureCamera();
+    if (camState === "error" || camState === "paused" || camState === "off") {
+      const started = await ensureCamera();
+      if (!started) {
+        renderOutcome({
+          category: "none",
+          title: "CAMERA NOT AVAILABLE",
+          meta: "Scan cancelled",
+          explanation: "The scanner needs the camera to identify an item. Use the manual lookup below to find your bin instead.",
+        });
+      }
+    }
     return;
   }
+
+  // Lazy model load — only download on the first scan, not on page load.
   if (!detector) {
-    loadDetector();
-    return;
+    const d = await loadDetector();
+    if (!d) {
+      renderOutcome({
+        category: "none",
+        title: "AI MODEL UNAVAILABLE",
+        meta: "Scan cancelled",
+        explanation: "The on-device model could not be downloaded (about 41 MB on first use). Check your connection and press Retry above, or use the manual lookup below.",
+      });
+      return;
+    }
   }
 
   scanning = true;
@@ -357,16 +584,21 @@ async function runScan() {
 
   try {
     const frame = captureFrame();
-    const outputs = await detector(frame, { threshold: 0.5, percentage: true });
-    handleDetections(outputs);
+    const result = await withTimeout(
+      detector(frame, { threshold: SCAN_THRESHOLD, percentage: true }),
+      SCAN_TIMEOUT_MS,
+      "Inference timed out"
+    );
+    handleDetections(result);
   } catch (err) {
     console.error("Scan failed:", err);
-    renderResult({
-      category: "landfill",
-      title: "BLUE LANDFILL BIN",
-      meta: "Scan error",
-      explanation: CATEGORY_INFO.landfill.explanation,
-      note: UNCERTAINTY_NOTE,
+    clearOverlay();
+    // A crash is NOT a bin verdict — say so plainly.
+    renderOutcome({
+      category: "none",
+      title: "SCAN FAILED",
+      meta: String((err && err.message) || err || "Unknown error"),
+      explanation: "The scanner could not analyse that frame. Hold the item still, fill the frame with it, and try again — or use the manual lookup below.",
     });
   } finally {
     scanning = false;
@@ -375,44 +607,78 @@ async function runScan() {
   }
 }
 
+const SCAN_THRESHOLD = 0.5;
+const SCAN_TIMEOUT_MS = 90000;
+
+function withTimeout(promise, ms, message) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message + " after " + Math.round(ms / 1000) + "s")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 function handleDetections(outputs) {
-  const list = Array.isArray(outputs) ? outputs : [];
+  const list = Array.isArray(outputs) ? outputs.slice() : [];
   if (!list.length) {
-    renderResult({
-      category: "landfill",
-      title: "BLUE LANDFILL BIN",
-      meta: "No clear object detected",
-      explanation: CATEGORY_INFO.landfill.explanation,
+    clearOverlay();
+    // No detection is NOT a bin verdict.
+    renderOutcome({
+      category: "none",
+      title: "NO OBJECT DETECTED",
+      meta: "Nothing above " + Math.round(SCAN_THRESHOLD * 100) + "% confidence",
+      explanation: "The scanner couldn't confidently identify anything in that frame. Move closer so the item fills the frame, improve the lighting, and scan again — or use the manual lookup below.",
+    });
+    return;
+  }
+  list.sort((a, b) => (b.score || 0) - (a.score || 0));
+  drawDetections(list);
+
+  const top = list[0];
+  const label = (top.label || "").toLowerCase();
+  const score = Math.round((top.score || 0) * 100);
+  const { category, note } = classify(label);
+  const info = CATEGORY_INFO[category] || CATEGORY_INFO.none;
+
+  // Detected something, but it isn't in our label map: still no bin verdict.
+  if (category === "none") {
+    renderOutcome({
+      category: "none",
+      title: "ITEM NOT RECOGNISED",
+      meta: "Detected: " + (label || "unknown") + " · " + score + "% confidence",
+      explanation: "The scanner found something but has no South Australian bin rule for it. Check the manual lookup below or the official Which Bin guide rather than guessing.",
       note: UNCERTAINTY_NOTE,
     });
     return;
   }
-  list.sort((a, b) => b.score - a.score);
-  const top = list[0];
-  const label = (top.label || "").toLowerCase();
-  const score = Math.round((top.score || 0) * 100);
-  const category = classify(label);
 
-  renderResult({
+  // Secondary detections, so multi-object frames aren't silently discarded.
+  const others = list
+    .slice(1, 4)
+    .map((d) => (d.label || "").toLowerCase() + " " + Math.round((d.score || 0) * 100) + "%");
+
+  renderOutcome({
     category,
-    title: CATEGORY_INFO[category].title,
+    title: info.title,
     meta: "Detected: " + label + " · " + score + "% confidence",
-    explanation: CATEGORY_INFO[category].explanation,
-    note: category === "landfill" || score < 60 ? UNCERTAINTY_NOTE : null,
+    explanation: info.explanation,
+    note: note || (category === "landfill" || category === "none" || score < 60 ? UNCERTAINTY_NOTE : null),
+    also: others,
   });
 }
 
 /* ------------------------------------------------------------------
    RESULT RENDERING
    ------------------------------------------------------------------ */
-function renderResult({ category, title, meta, explanation, note }) {
+function renderOutcome({ category, title, meta, explanation, note, also }) {
   resultEmpty.hidden = true;
   resultContent.hidden = false;
   resultContent.innerHTML = `
     <div class="result-card" data-category="${category}">
       <div class="cat-title">${title}</div>
       <div class="cat-meta">${meta || ""}</div>
-      <div class="cat-why"><p>${explanation}</p></div>
+      ${explanation ? `<div class="cat-why"><p>${explanation}</p></div>` : ""}
+      ${also && also.length ? `<div class="cat-also">Also in frame: ${also.join(" · ")}</div>` : ""}
       ${note ? `<div class="cat-note">${note}</div>` : ""}
       <div class="cat-actions">
         <button class="btn" data-action="scan-again">${icon("scan", 18)} Scan Again</button>
@@ -430,6 +696,7 @@ function clearResult() {
   resultContent.hidden = true;
   resultContent.innerHTML = "";
   resultEmpty.hidden = false;
+  clearOverlay();
 }
 
 /* ------------------------------------------------------------------
@@ -449,9 +716,10 @@ function buildItemGrid() {
     tile.addEventListener("click", () => {
       const item = ITEMS.find((i) => i.id === tile.dataset.id);
       const category = BIN_TO_CATEGORY[item.bin];
-      renderResult({
+      const info = CATEGORY_INFO[category];
+      renderOutcome({
         category,
-        title: CATEGORY_INFO[category].title,
+        title: info.title,
         meta: "Manual lookup: " + item.name,
         explanation: item.why,
         note: category === "landfill" ? UNCERTAINTY_NOTE : null,
@@ -468,8 +736,8 @@ function buildLegend() {
   const data = [
     { bin: BINS.green, items: ["Food scraps", "Greasy pizza boxes", "Paper towels", "Garden waste"] },
     { bin: BINS.yellow, items: ["Clean cardboard", "Plastic bottles", "Aluminium cans", "Glass jars & bottles"] },
-    { bin: BINS.blue, items: ["Soft plastics", "Chip packets", "Broken glass", "Ceramics & nappies"] },
-    { bin: BINS.hazwaste, items: ["Batteries", "Light globes", "E-waste", "Paint & chemicals"] },
+    { bin: BINS.blue, items: ["Soft plastics", "Chip packets", "Crockery & drinking glasses", "Ceramics & nappies"] },
+    { bin: BINS.hazwaste, items: ["Batteries", "Light globes", "E-waste & appliances", "Paint & chemicals"] },
   ];
   legend.innerHTML = data
     .map(
@@ -632,6 +900,12 @@ function finishGame() {
 scanButton.addEventListener("click", runScan);
 $$('[data-action="restart"]').forEach((b) => b.addEventListener("click", startGame));
 
+// Release the camera when the tab is hidden or the page is unloaded.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden" && camState === "live") stopCamera("off");
+});
+window.addEventListener("pagehide", () => stopStream());
+
 /* ------------------------------------------------------------------
    INIT
    ------------------------------------------------------------------ */
@@ -640,8 +914,9 @@ function init() {
   buildItemGrid();
   buildBins();
   renderRound();
-  setModelLoading("Loading AI model…", 0);
-  loadDetector();
+  // NOTE: the model is deliberately NOT loaded here. It is ~41 MB and is
+  // fetched lazily on the first scan — see runScan().
+  setModelLoading("AI model loads on first scan (~41 MB)", 0);
   startCamera();
 }
 

@@ -35,6 +35,8 @@
   --cat-recycling: #E7B800;
   --cat-ewaste: #A4271F;
   --cat-landfill: #2B2B2B;
+  --cat-notwaste: #4A5D6B;
+  --cat-none: #6b6b67;
 }
 
 * { box-sizing: border-box; }
@@ -291,7 +293,17 @@ em { font-style: italic; }
 }
 #webcam.active { display: block; }
 
-.camera-frame { position: absolute; inset: 0; pointer-events: none; }
+/* Detection boxes drawn over the live video */
+#overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.camera-frame { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
 .corner {
   position: absolute;
   width: 26px; height: 26px;
@@ -374,6 +386,17 @@ em { font-style: italic; }
 .model-state.ready .progress-fill { width: 100%; }
 .model-state.error { background: #f6e9e7; }
 
+/* Model retry control — injected by setModelError() so a failed download
+   is always recoverable. */
+.model-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 10px;
+  min-height: 36px;
+}
+.model-retry svg { flex: none; }
+
 /* ============================= RESULT ============================= */
 .scan-side { display: grid; grid-template-columns: 1fr; gap: 14px; align-content: start; }
 .result-panel { padding: 0; }
@@ -415,6 +438,25 @@ em { font-style: italic; }
 .result-card[data-category="ewaste"] .btn,
 .result-card[data-category="landfill"] .btn { background: #fff; color: #1A1A1A; border-color: #1A1A1A; }
 .result-card[data-category="recycling"] .btn { background: #1A1A1A; color: #fff; border-color: #1A1A1A; }
+
+/* Non-verdict cards: "not a waste item", no detection, scan errors, unknown
+   labels. Deliberately neutral so they never read as a bin instruction. */
+.result-card[data-category="notwaste"] { background: var(--cat-notwaste); color: #fff; }
+.result-card[data-category="none"] {
+  background: var(--surface);
+  color: var(--ink);
+  border-left: 6px solid var(--danger);
+}
+.result-card[data-category="notwaste"] .btn { background: #fff; color: #1A1A1A; border-color: #1A1A1A; }
+.result-card[data-category="none"] .btn { background: var(--ink); color: #fff; border-color: var(--ink); }
+.result-card[data-category="none"] .cat-note { border-top-color: rgba(26,26,26,.35); }
+
+.result-card .cat-also {
+  font-size: .76rem;
+  font-weight: 600;
+  opacity: .85;
+  margin-bottom: 10px;
+}
 
 /* ============================= MANUAL ITEM GRID ============================= */
 .manual-panel { padding: 0; }

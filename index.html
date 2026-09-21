@@ -5,7 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="EcoScan SA — a live AI camera Smart Waste Sorting Guide for South Australia's Which Bin recycling rules. Built for the Oliphant Science Awards, Year 7 Multimedia." />
   <meta name="theme-color" content="#1E4620" />
+  <meta property="og:title" content="EcoScan SA — Smart Waste Sorting Guide" />
+  <meta property="og:description" content="Point your camera at an item and an on-device AI model tells you which South Australian bin it belongs to — and why." />
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="en_AU" />
   <title>EcoScan SA — Smart Waste Sorting Guide</title>
+
+  <!-- Inline SVG favicon (no extra request, no 404) -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='4' fill='%231E4620'/%3E%3Cg fill='none' stroke='%23F4F4F3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19a6 6 0 0 1-1-11.9C15.9 6.2 17 5.7 18.5 3.6c.8 1.7 1.6 3.5 1.6 6.7 0 4.7-3.9 8.7-8.1 8.7Z'/%3E%3C/g%3E%3C/svg%3E" />
 
   <!-- Header typeface (body uses the system sans-serif stack) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -100,6 +107,7 @@
 
             <div class="camera" id="camera">
               <video id="webcam" autoplay playsinline muted></video>
+              <canvas id="overlay" aria-hidden="true"></canvas>
               <canvas id="capture" hidden></canvas>
               <div class="camera-frame" aria-hidden="true">
                 <span class="corner tl"></span><span class="corner tr"></span>
@@ -293,6 +301,11 @@
                 <span class="log-version">v1.1</span>
                 <span class="log-date">(your edit)</span>
                 <p>Prompt: <em>Add / fix …</em> — describe what you changed and why.</p>
+              </div>
+              <div class="log-entry">
+                <span class="log-version">v1.2</span>
+                <span class="log-date">Scanner reliability</span>
+                <p>Prompt: <em>"Find everything that doesn't work — the scanner is the central feature — then fix the worst ten."</em> Audited the scanner and fixed: model-load failures now offer a retry instead of dead-ending; scan errors, empty detections and unrecognised items no longer falsely announce "Blue landfill bin"; all 90 labels the model can produce are mapped to a South Australian bin rule (crockery, drinking glasses and cutlery corrected from yellow to landfill, appliances corrected to the specialised drop-off); the model is now loaded on first scan instead of on page load; inference runs off the main thread so the page stays responsive; the backend fallback ladder now tries genuinely different configurations; every detection is boxed on the live video with secondary detections listed; a dead camera and an unloaded model now explain themselves; and the camera is released when the tab is hidden.</p>
               </div>
             </div>
           </article>
