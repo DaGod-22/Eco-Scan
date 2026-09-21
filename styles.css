@@ -1042,3 +1042,8 @@ code { font-size: .84em; background: rgba(26,26,26,.07); padding: 1px 4px; borde
   height: calc(var(--appbar-h) + env(safe-area-inset-top));
 }
 #main { padding-top: calc(var(--appbar-h) + env(safe-area-inset-top) + 16px); }
+
+/* v2.1 — model download affordance */
+[hidden] { display: none !important; }
+.model-note { font-size: .74rem; line-height: 1.45; color: var(--ink-soft); margin: 9px 0 0; }
+#model-preload { width: 100%; margin-top: 10px; justify-content: center; }

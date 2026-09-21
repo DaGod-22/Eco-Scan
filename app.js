@@ -116,6 +116,8 @@ const modelText = $("#model-text");
 const modelPct = $("#model-pct");
 const modelProgress = $("#model-progress");
 const scanButton = $("#scan-button");
+const modelPreload = $("#model-preload");
+const modelNote = $("#model-note");
 const resultEmpty = $("#result-empty");
 const resultContent = $("#result-content");
 
@@ -123,6 +125,12 @@ const SCAN_THRESHOLD = 0.45;
 const SCAN_TIMEOUT_MS = 90000;
 const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/dist/transformers.web.min.js";
 const MODEL_ID = "Xenova/detr-resnet-50";
+// onnx/model_quantized.onnx for MODEL_ID, measured from the repo tree.
+const MODEL_BYTES = 43102531;
+const MODEL_MB = (MODEL_BYTES / 1048576).toFixed(1);
+// ort-wasm-simd-threaded.jsep.wasm shipped inside the same npm package.
+const WASM_BYTES = 23929658;
+const FIRST_RUN_MB = ((MODEL_BYTES + WASM_BYTES) / 1048576).toFixed(0);
 
 /* ==================================================================
    NAVIGATION
@@ -259,15 +267,28 @@ function ensureCamera() {
 /* ==================================================================
    MODEL
    ================================================================== */
+/**
+ * Every step here resolves to the SAME file on the model repo
+ * (onnx/model_quantized.onnx, 41.1 MiB), so retrying a failed backend is free —
+ * the bytes are already in the HTTP cache.
+ *
+ * This ladder used to escalate to webgpu/fp16 (79.9 MiB) and then wasm/fp32
+ * (159.1 MiB). Each "recovery" attempt therefore downloaded a model up to four
+ * times larger than the one that had just failed — 303 MiB in total before
+ * giving up. Recovery must never cost more than the attempt it is recovering
+ * from. Verified sizes from the repo tree:
+ *   q8/model_quantized.onnx  43,102,531 B   <- used by every step
+ *   fp16/model_fp16.onnx     83,812,437 B   <- never requested
+ *   fp32/model.onnx         166,789,212 B   <- never requested
+ */
 function deviceLadder() {
   const ladder = [
     { label: "CPU · WASM · quantised", opts: { device: "wasm", dtype: "q8" }, proxy: true },
     { label: "CPU · WASM · quantised", opts: { device: "wasm", dtype: "q8" }, proxy: false },
   ];
   if (typeof navigator !== "undefined" && navigator.gpu) {
-    ladder.push({ label: "GPU · WebGPU", opts: { device: "webgpu", dtype: "fp16" }, proxy: false });
+    ladder.push({ label: "GPU · WebGPU · quantised", opts: { device: "webgpu", dtype: "q8" }, proxy: false });
   }
-  ladder.push({ label: "CPU · WASM · fp32", opts: { device: "wasm", dtype: "fp32" }, proxy: false });
   return ladder;
 }
 
@@ -342,8 +363,17 @@ async function loadDetector(opts = {}) {
           progress_callback: (p) => {
             if (!p) return;
             if (p.status === "progress") {
-              const pct = Math.max(0, Math.min(100, Math.round(p.progress || 0)));
-              setModelLoading("Downloading model · " + step.label + "…", pct);
+              const loaded = Number(p.loaded) || 0;
+              const total = Number(p.total) || 0;
+              const pct = Number.isFinite(p.progress)
+                ? Math.max(0, Math.min(100, Math.round(p.progress)))
+                : (total ? Math.max(0, Math.min(100, Math.round((loaded / total) * 100))) : 0);
+              const mb = total
+                ? " · " + (loaded / 1048576).toFixed(1) + "/" + (total / 1048576).toFixed(1) + " MB"
+                : "";
+              setModelLoading("Downloading " + (p.file || "model") + mb + " · " + step.label + "…", pct);
+            } else if (p.status === "initiate") {
+              setModelLoading("Requesting " + (p.file || "model files") + " · " + step.label + "…", 0);
             } else if (p.status === "done") {
               setModelLoading("Finalising model · " + step.label + "…", 100);
             }
@@ -362,7 +392,13 @@ async function loadDetector(opts = {}) {
   } catch (err) {
     console.error("Model load failed:", err);
     detector = null;
-    setModelError("Could not load the AI model. Check your connection and press Retry — the manual lookup below still works.");
+    const name = String((err && err.name) || "");
+    const text = String((err && err.message) || err || "");
+    const unreachable = name === "TypeError" || /fetch|network|import|CORS|blocked|offline|ERR_/i.test(text);
+    const diagnosis = unreachable
+      ? "The browser could not reach the model files. That normally means this network is blocking cdn.jsdelivr.net or huggingface.co, or the device is offline."
+      : "The model could not be started in this browser.";
+    setModelError(diagnosis + " Press Retry, or use the manual lookup below — it needs no download and works offline.");
     return null;
   } finally {
     modelLoading = false;
@@ -373,10 +409,23 @@ async function loadDetector(opts = {}) {
    CLASSIFICATION PIPELINE (layers 2 → 5)
    ================================================================== */
 
+/**
+ * Coerce a detection score to a 0–1 fraction.
+ * transformers.js emits fractions by default but multiplies by 100 when a
+ * caller passes `percentage: true`. Accept either rather than silently
+ * clamping 91 down to 1 — that bug made every scan look 100% certain.
+ */
+function normaliseScore(raw) {
+  let s = Number(raw);
+  if (!Number.isFinite(s)) return 0;
+  if (s > 1) s = s / 100;
+  return Math.max(0, Math.min(1, s));
+}
+
 /** Layer 2+3+4+5 for a single detection. */
 function analyseDetection(det) {
   const rawLabel = String((det && det.label) || "").toLowerCase().trim();
-  const detectionScore = Math.max(0, Math.min(1, Number((det && det.score) || 0)));
+  const detectionScore = normaliseScore(det && det.score);
 
   // Layer 2 — object recognition result → waste-relevant concept
   if (!Object.prototype.hasOwnProperty.call(LABEL_TO_CONCEPT, rawLabel)) {
@@ -449,6 +498,8 @@ function syncScanButton() {
       : (camState === "live" && !detector) ? "Load model & scan"
       : "Scan Item";
   }
+  // Offer the download as a deliberate choice rather than a surprise mid-scan.
+  if (modelPreload) modelPreload.hidden = !!detector || modelLoading || modelFailed;
 }
 
 function captureFrame() {
@@ -541,7 +592,11 @@ async function runScan() {
 
   try {
     const frame = captureFrame();
-    const outputs = await withTimeout(detector(frame, { threshold: SCAN_THRESHOLD, percentage: true }), SCAN_TIMEOUT_MS, "Inference timed out");
+    // NOTE: no `percentage: true`. That option multiplies every score by 100,
+    // which silently collapsed the whole confidence model — analyseDetection
+    // clamps to [0,1], so a 0.91 detection became 1.0 and every scan looked
+    // maximally certain. Scores are fractions here.
+    const outputs = await withTimeout(detector(frame, { threshold: SCAN_THRESHOLD }), SCAN_TIMEOUT_MS, "Inference timed out");
     handleDetections(outputs);
   } catch (err) {
     console.error("Scan failed:", err);
@@ -1218,6 +1273,19 @@ window.addEventListener("resize", () => {
    INIT
    ================================================================== */
 function init() {
+  if (modelNote) {
+    modelNote.textContent = "Runs on your device — no photo is ever uploaded. The model is about " +
+      MODEL_MB + " MB and the browser runtime about " + (WASM_BYTES / 1048576).toFixed(0) +
+      " MB; both download once and are then cached, so roughly " + FIRST_RUN_MB +
+      " MB on a first visit and almost nothing after that.";
+  }
+  if (modelPreload) {
+    modelPreload.addEventListener("click", () => {
+      modelPreload.disabled = true;
+      loadDetector({ force: false }).then((d) => { modelPreload.disabled = false; syncScanButton(); return d; });
+    });
+  }
+
   buildLegend();
   buildItemGrid();
   buildScience();

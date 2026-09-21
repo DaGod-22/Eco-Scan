@@ -118,7 +118,10 @@
             <div class="model-state" id="model-state">
               <div class="model-row"><span id="model-text">Loading AI model…</span><span id="model-pct"></span></div>
               <div class="progress"><div class="progress-fill" id="model-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="AI model download progress"></div></div>
+              <p class="model-note" id="model-note">Runs on your device — no photo is ever uploaded. The model is about 41&nbsp;MB and the browser runtime about 24&nbsp;MB; both are downloaded once and then cached, so roughly 65&nbsp;MB on a first visit and almost nothing after that.</p>
             </div>
+
+            <button class="btn btn-ghost" id="model-preload" type="button" hidden>Download the AI model now</button>
 
             <button class="btn btn-scan" id="scan-button" type="button" data-action="scan" disabled>
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
