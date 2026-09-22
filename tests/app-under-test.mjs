@@ -19,7 +19,7 @@ import {
   ITEMS, GAME_ITEMS, SCIENCE_FACTS, SCIENCE_BLOCKS,
   REFERENCES, REFERENCE_ORDER,
   disposalConfidence, confidenceBand,
-} from "./data.js";
+} from "../data.js";
 
 /* ------------------------------------------------------------------
    ICONS
@@ -143,10 +143,7 @@ const SCAN_TIMEOUT_MS = 90000;
  * a root-relative URL ("/npm/onnxruntime-common/+esm"), which is the only form
  * a browser can actually resolve. Verified by inspecting the served bytes.
  */
-const TRANSFORMERS_URLS = [
-  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/+esm",
-  "https://esm.sh/@huggingface/transformers@3.4.0",
-];
+const TRANSFORMERS_URLS = ["./stub-transformers.mjs"];
 const MODEL_ID = "Xenova/detr-resnet-50";
 // onnx/model_quantized.onnx for MODEL_ID, measured from the repo tree.
 const MODEL_BYTES = 43102531;
@@ -1411,3 +1408,16 @@ function init() {
 }
 
 init();
+
+
+/* ---- appended by tests/build.mjs — not part of the shipped app.js ---- */
+export { icon, activateTab, setCamState, cameraStatusError, startCamera, stopStream, stopCamera, ensureCamera, deviceLadder, setModelLoading, setModelReady, setModelError, loadDetector, normaliseScore, analyseDetection, syncScanButton, captureFrame, clearOverlay, drawDetections, withTimeout, readAsDataURL, loadPhoto, runScan, handleDetections, sourceLine, renderNoVerdict, renderScanResult, confidenceBar, wireResultActions, clearResult, buildItemGrid, showManualItem, buildLegend, buildScience, shuffle, buildBins, startGame, renderRound, selectGameItem, submitSort, flash, showTeaching, finishGame, buildReferences, loadFeedback, saveFeedback, renderFeedbackList, initFeedbackForm, setFeedbackStatus, downloadFeedback, init, ICONS, esc, FEEDBACK_KEY, $, $$, video, captureCanvas, captureCtx, overlayCanvas, overlayCtx, cameraBox, camDot, camStatus, cameraState, modelState, modelText, modelPct, modelProgress, scanButton, modelPreload, photoImg, photoInput, photoButton, modelNote, resultEmpty, resultContent, SCAN_THRESHOLD, SCAN_TIMEOUT_MS, TRANSFORMERS_URLS, MODEL_ID, MODEL_BYTES, MODEL_MB, WASM_BYTES, FIRST_RUN_MB };
+export const __state = () => ({ camState, detector, modelLoading, modelFailed, modelBackend, scanning, gameScore, answered, selectedItem, gamePool });
+export const __set = (o) => {
+  if ("camState" in o) camState = o.camState;
+  if ("detector" in o) detector = o.detector;
+  if ("scanning" in o) scanning = o.scanning;
+  if ("gamePool" in o) gamePool = o.gamePool;
+  if ("modelFailed" in o) modelFailed = o.modelFailed;
+  if ("modelLoading" in o) modelLoading = o.modelLoading;
+};

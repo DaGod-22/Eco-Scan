@@ -5,16 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="EcoScan SA — a live AI camera Smart Waste Sorting Guide for South Australia's Which Bin recycling rules. Built for the Oliphant Science Awards, Year 7 Multimedia." />
   <meta name="theme-color" content="#1E4620" />
+  <meta property="og:title" content="EcoScan SA — Smart Waste Sorting Guide" />
+  <meta property="og:description" content="Point your camera at an item and an on-device AI model tells you which South Australian bin it belongs to — and why. Where it is not sure, it says so." />
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="en_AU" />
   <title>EcoScan SA — Smart Waste Sorting Guide</title>
 
-  <!-- Header typeface (body uses the system sans-serif stack) -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='4' fill='%231E4620'/%3E%3Cg fill='none' stroke='%23F4F4F3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19a6 6 0 0 1-1-11.9C15.9 6.2 17 5.7 18.5 3.6c.8 1.7 1.6 3.5 1.6 6.7 0 4.7-3.9 8.7-8.1 8.7Z'/%3E%3C/g%3E%3C/svg%3E" />
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
-
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
   <div class="app-shell">
 
     <!-- ============ TOP APP BAR (phone) ============ -->
@@ -32,7 +38,7 @@
     </header>
 
     <!-- ============ NAVIGATION ============ -->
-    <nav class="site-nav" aria-label="Main navigation">
+    <nav class="site-nav" aria-label="Main">
       <div class="nav-brand" aria-hidden="true">
         <span class="brand-mark">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -47,26 +53,26 @@
       </div>
 
       <div class="nav-items">
-        <button class="bnav-item is-active" data-tab="home" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button class="bnav-item is-active" data-tab="home" type="button" aria-current="page">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/>
           </svg>
           <span>Scan</span>
         </button>
-        <button class="bnav-item" data-tab="science" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button class="bnav-item" data-tab="science" type="button" aria-current="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M10 2v7.5L4.5 20.5A2 2 0 0 0 6.2 23h11.6a2 2 0 0 0 1.7-2.5L14 9.5V2"/><path d="M8.5 2h7"/><path d="M7 15h10"/>
           </svg>
           <span>Science</span>
         </button>
-        <button class="bnav-item" data-tab="game" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button class="bnav-item" data-tab="game" type="button" aria-current="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v6a5 5 0 0 1-10 0V4z"/><path d="M7 6H4a1 1 0 0 0-1 1c0 2 1.5 3.5 4 4"/><path d="M17 6h3a1 1 0 0 1 1 1c0 2-1.5 3.5-4 4"/>
           </svg>
           <span>Game</span>
         </button>
-        <button class="bnav-item" data-tab="report" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button class="bnav-item" data-tab="report" type="button" aria-current="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="M9 15h6"/>
           </svg>
           <span>Report</span>
@@ -83,61 +89,68 @@
     <main id="main">
 
       <!-- ================= SCAN ================= -->
-      <section class="page is-active" id="page-home" data-page="home">
+      <section class="page is-active" id="page-home" data-page="home" aria-labelledby="home-title">
         <div class="page-head">
           <span class="eyebrow">South Australia · Which Bin Rules</span>
-          <h1>Master Your Waste</h1>
-          <p class="lede">Point your camera at an item and press Scan Item. An on-device AI model identifies the object and tells you which bin it belongs to — and why.</p>
+          <h1 id="home-title">Master Your Waste</h1>
+          <p class="lede">Point your camera at an item and press Scan Item. An on-device AI model identifies the object, works out what it is likely made of, and tells you which South Australian bin it belongs to — and why. When it is not sure, it says so instead of guessing.</p>
         </div>
 
         <div class="scan-layout">
-          <!-- Camera panel -->
           <div class="panel camera-panel">
             <div class="panel-head">
               <span class="panel-title"><span class="dot" id="cam-dot" aria-hidden="true"></span> Live Camera</span>
-              <span class="status-badge" id="cam-status">starting</span>
+              <span class="status-badge" id="cam-status" aria-live="polite">starting</span>
             </div>
 
             <div class="camera" id="camera">
-              <video id="webcam" autoplay playsinline muted></video>
+              <video id="webcam" autoplay playsinline muted aria-label="Live camera preview"></video>
+              <img id="scan-photo" alt="The photo being scanned" hidden>
+              <canvas id="overlay" aria-hidden="true"></canvas>
               <canvas id="capture" hidden></canvas>
               <div class="camera-frame" aria-hidden="true">
                 <span class="corner tl"></span><span class="corner tr"></span>
                 <span class="corner bl"></span><span class="corner br"></span>
                 <span class="scan-line" id="scan-line"></span>
               </div>
-              <div class="camera-state" id="camera-state"><p>Requesting camera access…</p></div>
+              <div class="camera-state" id="camera-state" role="status"><p>Requesting camera access…</p></div>
             </div>
 
             <div class="model-state" id="model-state">
               <div class="model-row"><span id="model-text">Loading AI model…</span><span id="model-pct"></span></div>
-              <div class="progress"><div class="progress-fill" id="model-progress"></div></div>
+              <div class="progress"><div class="progress-fill" id="model-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="AI model download progress"></div></div>
+              <p class="model-note" id="model-note">Runs on your device — no photo is ever uploaded. The model is about 41&nbsp;MB and the browser runtime about 24&nbsp;MB; both are downloaded once and then cached, so roughly 65&nbsp;MB on a first visit and almost nothing after that.</p>
             </div>
 
-            <button class="btn btn-scan" id="scan-button" data-action="scan" disabled>
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <button class="btn btn-ghost" id="model-preload" type="button" hidden>Download the AI model now</button>
+
+            <input type="file" id="photo-input" accept="image/*" hidden>
+            <button class="btn btn-ghost" id="photo-button" type="button">Use a photo instead of the camera</button>
+
+            <button class="btn btn-scan" id="scan-button" type="button" data-action="scan" disabled>
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/>
               </svg>
               <span>Scan Item</span>
             </button>
           </div>
 
-          <!-- Result + manual lookup -->
           <div class="scan-side">
-            <div class="panel result-panel" id="result-panel" aria-live="polite">
+            <div class="panel result-panel" id="result-panel">
               <div class="panel-head">
                 <span class="panel-title">Result</span>
               </div>
               <div class="result-empty" id="result-empty">
-                <p>Scan an item with your camera, or choose one below, to see which bin it belongs to.</p>
+                <p>Scan an item with your camera, or choose one from the list below, to see which bin it belongs to.</p>
+                <p class="result-hint">The scanner separates two different things: how sure it is about the <strong>object</strong>, and how sure it is about the <strong>bin</strong>. A photo cannot show whether something is clean, whole, rigid or soft — so the two numbers are not the same.</p>
               </div>
-              <div class="result-content" id="result-content" hidden></div>
+              <div class="result-content" id="result-content" hidden aria-live="polite"></div>
             </div>
 
-            <div class="panel manual-panel">
+            <div class="panel manual-panel" id="manual-panel">
               <div class="panel-head">
                 <span class="panel-title">Manual lookup</span>
-                <span class="panel-note">no camera needed</span>
+                <span class="panel-note">no camera needed · sourced</span>
               </div>
               <div class="item-grid" id="item-grid"></div>
             </div>
@@ -146,143 +159,104 @@
 
         <div class="section">
           <h2 class="section-title">Know Your Bins</h2>
-          <p class="section-sub">South Australia's three-bin system — plus the drop-offs for the tricky stuff.</p>
+          <p class="section-sub">South Australia's three-bin system — plus the drop-offs for the tricky stuff. Some items vary by council; the manual lookup flags those.</p>
           <div class="bin-legend" id="bin-legend"></div>
         </div>
       </section>
 
       <!-- ================= SCIENCE ================= -->
-      <section class="page" id="page-science" data-page="science">
+      <section class="page" id="page-science" data-page="science" aria-labelledby="science-title">
         <div class="page-head">
           <span class="eyebrow">Educational Hub</span>
-          <h1>The Science of Waste</h1>
-          <p class="lede">Why does it matter which bin you choose? The answer is all about chemistry, energy and biology.</p>
+          <h1 id="science-title">The Science of Waste</h1>
+          <p class="lede">Why does it matter which bin you choose? The answer is chemistry, microbiology, materials science and a lot of very fast machinery.</p>
         </div>
 
         <div class="science-block">
-          <h2 class="section-title">Decomposition: Two Very Different Fates</h2>
-          <p class="section-sub">When organic waste breaks down, the result depends entirely on whether oxygen is present.</p>
-          <div class="science-grid">
-            <article class="panel science-card landfill">
-              <svg class="sci-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a4 4 0 0 0 0-8z"/>
-              </svg>
-              <h3>In Landfill — No Oxygen</h3>
-              <p class="science-badge">Anaerobic decomposition</p>
-              <p>Buried deep and squashed, food scraps rot <strong>without oxygen</strong>. Microbes that thrive without air produce <strong>methane (CH₄)</strong> — a greenhouse gas about <strong>28&times; more powerful</strong> at trapping heat than carbon dioxide.</p>
-              <p class="science-note">Methane leaking from landfill is a major driver of climate change.</p>
-            </article>
-
-            <article class="panel science-card compost">
-              <svg class="sci-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
-                <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
-              </svg>
-              <h3>In the Green Bin — With Oxygen</h3>
-              <p class="science-badge">Aerobic composting</p>
-              <p>In South Australia's green bins, organics are turned and aerated in large-scale composting. With oxygen, friendly microbes break waste down into <strong>rich, dark compost</strong> — a natural fertiliser — instead of methane.</p>
-              <p class="science-note">Same banana peel. Totally different outcome. That's why sorting matters.</p>
-            </article>
-          </div>
+          <h2 class="section-title">Key numbers, with their sources</h2>
+          <p class="section-sub">Every figure below is attributed. Where a number genuinely varies between studies, the range is shown rather than a single misleading value.</p>
+          <div class="facts-grid" id="facts-grid"></div>
         </div>
 
-        <div class="science-block">
-          <h2 class="section-title">The Circular Economy: Energy You Can Measure</h2>
-          <p class="section-sub">Recycling isn't just "nice" — it saves enormous amounts of energy compared to mining and refining raw materials.</p>
-
-          <div class="flow-steps" aria-hidden="true">
-            <div class="flow-step">Make</div>
-            <div class="flow-arrow">&rarr;</div>
-            <div class="flow-step">Use</div>
-            <div class="flow-arrow">&rarr;</div>
-            <div class="flow-step">Recycle</div>
-          </div>
-          <p class="flow-note">Materials loop back to "Make" — that's the circular economy.</p>
-
-          <div class="energy-grid">
-            <article class="panel energy-card">
-              <div class="energy-bar" style="--w:95%"><span>95%</span></div>
-              <h4>Aluminium cans</h4>
-              <p>Recycling one can saves ~95% of the energy of making a new one from raw bauxite.</p>
-            </article>
-            <article class="panel energy-card">
-              <div class="energy-bar" style="--w:74%"><span>74%</span></div>
-              <h4>Steel &amp; tin cans</h4>
-              <p>Recycled steel saves ~74% of energy versus mining and smelting iron ore.</p>
-            </article>
-            <article class="panel energy-card">
-              <div class="energy-bar" style="--w:88%"><span>88%</span></div>
-              <h4>Hard plastics</h4>
-              <p>Turning old PET bottles into new ones uses far less oil and ~88% less energy.</p>
-            </article>
-          </div>
-        </div>
-
-        <div class="science-block">
-          <h2 class="section-title">Quick Facts</h2>
-          <div class="facts-grid">
-            <div class="panel fact"><span class="fact-num">28×</span><p>Methane's heat-trapping power compared to CO₂.</p></div>
-            <div class="panel fact"><span class="fact-num">95%</span><p>Energy saved recycling aluminium vs. raw bauxite.</p></div>
-            <div class="panel fact"><span class="fact-num">1 jam</span><p>A soft plastic bag can jam a whole sorting machine.</p></div>
-            <div class="panel fact"><span class="fact-num">∞</span><p>Aluminium and glass can be recycled again and again.</p></div>
-          </div>
-        </div>
+        <div id="science-blocks"></div>
       </section>
 
       <!-- ================= GAME ================= -->
-      <section class="page" id="page-game" data-page="game">
+      <section class="page" id="page-game" data-page="game" aria-labelledby="game-title">
         <div class="page-head">
           <span class="eyebrow">Practice Makes Perfect</span>
-          <h1>Waste Sorting Mini-Game</h1>
-          <p class="lede">Drag (or tap) each item into its correct South Australian household bin. Score out of 5.</p>
+          <h1 id="game-title">Waste Sorting Mini-Game</h1>
+          <p class="lede">Drag — or tap — each item into its correct South Australian household bin. Get one wrong and the game explains the rule behind it.</p>
         </div>
 
         <div class="game-hud">
           <div class="hud-score">Score <strong id="game-score">0</strong> / 5</div>
           <div class="hud-round">Round <strong id="game-round">1</strong></div>
-          <button class="btn btn-ghost btn-sm" data-action="restart">Restart</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-action="restart">Restart</button>
         </div>
+
+        <p class="game-hint" id="game-hint" hidden>Now choose a bin — or press Enter on the bin you want.</p>
 
         <div class="game-area">
           <div class="game-items" id="game-items" aria-label="Items to sort"></div>
-          <div class="game-bins" id="game-bins"></div>
+          <div class="game-bins" id="game-bins" aria-label="Bins"></div>
         </div>
 
-        <div class="panel game-feedback" id="game-feedback" hidden>
-          <p id="game-feedback-text"></p>
-          <button class="btn btn-primary" data-action="restart">Play Again</button>
-        </div>
+        <div class="panel game-teach" id="game-teach" hidden aria-live="polite"></div>
+        <div class="panel game-feedback" id="game-feedback" hidden aria-live="polite"></div>
       </section>
 
       <!-- ================= REPORT ================= -->
-      <section class="page" id="page-report" data-page="report">
+      <section class="page" id="page-report" data-page="report" aria-labelledby="report-title">
         <div class="page-head">
           <span class="eyebrow">Documentation</span>
-          <h1>About This Project</h1>
-          <p class="lede">Everything you need to know about how EcoScan SA was researched, built and improved.</p>
+          <h1 id="report-title">About This Project</h1>
+          <p class="lede">How EcoScan SA was researched and built, what its limits are, and where every fact came from.</p>
         </div>
 
         <div class="report-grid">
+          <div class="report-linked">
+          <article class="panel report-card report-main">
+            <h2>Report</h2>
+            <p>I came up with the idea of <strong>EcoScan SA</strong> because I saw people like my grandparents who come from different countries completely clueless about where to put their rubbish, as there are many bins in Australia. Even people who have been living in Australia for a long time though, like me or my parents, also get confused about where to put the rarer things, such as devices, batteries or magnets. This is why I thought of the idea of EcoScan SA.</p>
+            <p>My project is designed to assist people in knowing where to put their rubbish. Be it green bins, red bins or special waste disposal, our scanner covers it all. And if you don&rsquo;t have the image with you, check out our comprehensive database of many waste materials, ranging from greasy pizza boxes to e-waste (such as phones or devices). Aside from our scanner, we also have a fun minigame designed to educate you about waste and where it goes. If you don&rsquo;t know why, at the end of every round, my website educates you about your mistakes and why you were wrong.</p>
+            <p>The philosophy of my site is that it isn&rsquo;t just important to educate people about where they should put their rubbish, but rather to teach them <em>why</em> the correct sorting matters. For example, when organic food waste, such as banana peels, goes to the landfill bin, it gets trapped under piles of trash with no air, which creates a dangerous greenhouse gas called methane (CH<sub>4</sub>). Methane is <strong>80 to 86 times more damaging</strong> than carbon dioxide over its first 20 years in the atmosphere, and still <strong>28 times more damaging</strong> over a 100-year period, meaning that it can negatively affect climate change greatly. But, if the food waste goes into the green organics bin, it gets turned into rich compost or fertiliser for farms, like Jeffries and Peats Soil.</p>
+          </article>
+
+          <article class="panel report-card ai-disclosure">
+            <h2>AI Disclosure Statement</h2>
+            <p>This project was created with the assistance of <a href="https://arena.ai" target="_blank" rel="noopener noreferrer">Arena.ai</a>. The AI was used to <strong>generate the site&rsquo;s code, layout and interactive features</strong>, while I (the student author) directed the <strong>logical flow and design</strong> and verified the accuracy of the science data and bin-sorting rules against the South Australian sources listed below.</p>
+            <p>The object detection runs in the browser using Hugging Face Transformers.js and the <code>Xenova/detr-resnet-50</code> model. No image ever leaves the device. The model&rsquo;s outputs are treated as a starting point, not as an authority: every disposal rule the app states comes from a listed South Australian source, and the scanner is designed to say &ldquo;uncertain&rdquo; rather than to guess.</p>
+          </article>
+          </div>
+
+
           <article class="panel report-card">
-            <h2>Introduction</h2>
-            <p>I came up with the idea for <strong>EcoScan SA</strong> because I noticed how often my friends and family stand in front of the school or kitchen bins completely confused about where to throw away their rubbish. Even though South Australia is really good at recycling, a lot of people still make mistakes. They accidently put things like soft chip packets into the yellow bin, which jams up the sorting machines at our local recycling centres.</p>
-            <p>My project is a mobile website that fixes this problem by making waste sorting easy and fun. I designed an interactive "EcoScan" camera scanner where you can see exactly which household bin an item belongs to according to South Australia's <em>Which Bin</em> rules. I also built a drag-and-drop game to help people practice. The science goal of my site is to teach people <em>why</em> correct sorting matters. For example, when organic food waste goes into the landfill bin, it gets trapped under piles of trash with no air, which creates a dangerous greenhouse gas called methane. But if it goes in the green organics bin, it gets turned into rich compost for SA farms. I want my app to show that small everyday choices can help save energy and protect our environment.</p>
+            <h2>What the scanner can and cannot do</h2>
+            <p>The scanner runs a real object-detection model (<code>Xenova/detr-resnet-50</code>) entirely in your browser. It recognises 90 object classes. That is <strong>object recognition</strong>, which is not the same thing as <strong>waste classification</strong>.</p>
+            <ul class="tick-list">
+              <li><strong>Object recognition</strong> — "this is a bottle." Reported as <em>detection confidence</em>.</li>
+              <li><strong>Material inference</strong> — a bottle is probably rigid plastic or glass, but a photo cannot prove which. Each possibility is weighted.</li>
+              <li><strong>Disposal rule</strong> — the material and the object together are mapped to a South Australian category.</li>
+              <li><strong>Disposal confidence</strong> — detection confidence × material agreement × how much the answer depends on things a photo cannot show.</li>
+            </ul>
+            <p>When disposal confidence is low, the scanner refuses to name a bin and says <em>"AI identification is uncertain"</em> instead. It also refuses when the model detects nothing, when it detects something it has no rule for, or when a scan fails. A crash is never presented as a disposal instruction.</p>
+            <p class="report-limit"><strong>Honest limitation:</strong> the model cannot see grease, cleanliness, whether glass is broken, or whether plastic is rigid or soft — and those are exactly the distinctions some SA rules turn on. That is why the manual lookup exists, and why uncertain results always link to it.</p>
           </article>
 
           <article class="panel report-card">
-            <h2>Scientific Bibliography</h2>
-            <ul class="bibliography">
-              <li><em>Placeholder:</em> Which Bin SA — "What goes in which bin" (Green Industries SA). <a href="https://www.whichbin.sa.gov.au" target="_blank" rel="noopener">whichbin.sa.gov.au</a></li>
-              <li><em>Placeholder:</em> Green Industries SA — Household waste and recycling guidelines.</li>
-              <li><em>Placeholder:</em> B-cycle — Australia's official battery recycling scheme. <a href="https://bcycle.com.au" target="_blank" rel="noopener">bcycle.com.au</a></li>
-              <li><em>Placeholder:</em> A textbook or website explaining the greenhouse effect and methane from landfill.</li>
-              <li><em>Placeholder:</em> A source on the circular economy and energy saved by recycling metals &amp; plastics.</li>
-            </ul>
+            <h2>How the South Australian rules were checked</h2>
+            <p>Every disposal rule in this app was checked against a South Australian source, in this order of preference:</p>
+            <ol class="method-list">
+              <li>The state <em>Which Bin SA</em> guide published by Green Industries SA.</li>
+              <li>Green Industries SA guidance on batteries, e-waste and hazardous waste.</li>
+              <li>South Australian council waste pages, used where the state guide is silent.</li>
+            </ol>
+            <p>Where guidance genuinely varies between councils — tissues and paper towel are the clearest example — the item carries a visible note saying so rather than pretending there is a single statewide rule.</p>
           </article>
 
           <article class="panel report-card">
             <h2>Change Log</h2>
-            <p class="placeholder"><em>Use this log to record the prompts you gave the AI and the edits you made.</em></p>
             <div class="changelog">
               <div class="log-entry">
                 <span class="log-version">v1.0</span>
@@ -290,32 +264,76 @@
                 <p>Prompt: <em>"Create a Smart Waste Sorting Guide for South Australia's Which Bin rules…"</em> — generated the base layout, scanner, science content and game.</p>
               </div>
               <div class="log-entry">
-                <span class="log-version">v1.1</span>
-                <span class="log-date">(your edit)</span>
-                <p>Prompt: <em>Add / fix …</em> — describe what you changed and why.</p>
+                <span class="log-version">v1.2</span>
+                <span class="log-date">Scanner reliability</span>
+                <p>Prompt: <em>"Find everything that doesn't work — the scanner is the central feature — then fix the worst ten."</em> Fixed the model-load dead end, stopped failures from announcing a bin, mapped all 90 detectable labels, made the model load on first scan, moved inference off the main thread, built a real backend fallback ladder, drew detection boxes, and released the camera when the tab is hidden.</p>
+              </div>
+              <div class="log-entry">
+                <span class="log-version">v2.0</span>
+                <span class="log-date">Accuracy &amp; credibility pass</span>
+                <p>Prompt: <em>"Make it substantially more accurate, reliable, polished, educational and competition-ready."</em> Rebuilt the scanner as a layered pipeline that separates object recognition from material inference from the disposal decision; introduced a disposal confidence distinct from detection confidence, with an explicit "AI identification is uncertain" state; corrected the South Australian rules for crockery, glassware and cutlery; expanded the manual lookup to 34 sourced items; replaced every unsourced science figure with an attributed one and replaced the stub bibliography with 15 real sources; added What/Where/Why/Science structure to every result, teaching feedback in the game, and a local-only feedback tool.</p>
+              </div>
+              <div class="log-entry">
+                <span class="log-version">v2.2</span>
+                <span class="log-date">Report &amp; model loading</span>
+                <p>Replaced the generated introduction with my own report, and moved the AI disclosure statement directly underneath it so the two read as one document while staying separate. Corrected the methane figures to 80&ndash;86&times; over 20 years and 28&times; over 100 years. Fixed two scanner defects: the recovery ladder was escalating to model files of 80&nbsp;MB and 159&nbsp;MB after failing to load the 41&nbsp;MB one, and detection scores were being multiplied by 100 and then clamped to 1.0, which made every scan look maximally certain. Moved the test suite into <code>tests/</code> so it ships with the project.</p>
+              </div>
+              <div class="log-entry">
+                <span class="log-version">v2.3</span>
+                <span class="log-date">Scanner fixed</span>
+                <p>Three defects that together made the scanner non-functional. (1) The library was loaded from <code>dist/transformers.web.min.js</code>, whose first line contains bare module specifiers that a browser cannot resolve &mdash; the import failed before any code ran. Now loaded from a pre-bundled <code>+esm</code> bundle, with a second CDN as fallback. (2) Detection boxes read <code>x/y/width/height</code>, keys the pipeline never emits, so every box collapsed to a zero-size rectangle at the origin and was invisible. Boxes are now read as <code>xmin/ymin/xmax/ymax</code> and scaled from the known frame size. (3) Added a photo path, because <code>getUserMedia</code> is blocked inside iframes without a camera permission policy.</p>
               </div>
             </div>
           </article>
 
-          <article class="panel report-card ai-disclosure">
-            <h2>AI Disclosure Statement</h2>
-            <p>
-              This project was created with the assistance of
-              <a href="https://arena.ai" target="_blank" rel="noopener">Arena.ai</a>. The AI was used to
-              <strong>generate the site's code, layout and interactive features</strong>, while I (the student
-              author) directed the <strong>logical flow, design edits, and verified the accuracy of all
-              science data</strong> against official South Australian recycling guidelines. The live object
-              detection runs in the browser using Hugging Face Transformers.js and the
-              Xenova/detr-resnet-50 model. All scientific claims and bin-sorting rules reflect my own
-              research and understanding of the "Which Bin" system.
-            </p>
+          <article class="panel report-card">
+            <h2>Report a problem</h2>
+            <p>This site is a static page with no server, so there is nothing for a form to post to. Rather than fake a submission, your report is saved in <strong>this browser only</strong>. Copy or download it and send it on — the address is on the project submission sheet.</p>
+            <form id="feedback-form" novalidate>
+              <label class="field">
+                <span class="field-label">What is it about?</span>
+                <select name="type" required>
+                  <option value="">Choose one…</option>
+                  <option>Incorrect AI identification</option>
+                  <option>Incorrect disposal information</option>
+                  <option>Missing item</option>
+                  <option>Technical problem</option>
+                  <option>General feedback</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label">Details</span>
+                <textarea name="message" rows="4" required minlength="5" placeholder="What did you scan or look up, and what happened?"></textarea>
+              </label>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Save to this browser</button>
+              </div>
+              <p class="form-status" id="feedback-status" role="status"></p>
+            </form>
+
+            <div class="fb-tools">
+              <button class="btn btn-ghost btn-sm" type="button" id="feedback-copy">Copy all</button>
+              <button class="btn btn-ghost btn-sm" type="button" id="feedback-download">Download .txt</button>
+              <button class="btn btn-ghost btn-sm" type="button" id="feedback-clear">Clear</button>
+            </div>
+
+            <p class="fb-count">Saved in this browser: <strong id="feedback-count">0</strong></p>
+            <p class="fb-empty" id="feedback-empty">Nothing saved yet.</p>
+            <ul class="fb-list" id="feedback-list"></ul>
           </article>
+
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">Sources &amp; References</h2>
+          <p class="section-sub">Every disposal rule and scientific claim in this app is traceable to one of the <strong id="references-count">0</strong> sources below. Each entry records what it was used for. Every citation here is a real, checked source.</p>
+          <ol class="references" id="references-list"></ol>
         </div>
 
         <footer class="in-page-footer">
           <p class="footer-brand">EcoScan SA</p>
           <p class="footer-meta">Oliphant Science Awards · Year 7 · Multimedia · South Australia</p>
-          <p class="footer-disclosure">Built with <a href="https://arena.ai" target="_blank" rel="noopener">Arena.ai</a> assistance — science data verified against official SA "Which Bin" rules.</p>
+          <p class="footer-disclosure">Built with <a href="https://arena.ai" target="_blank" rel="noopener noreferrer">Arena.ai</a> assistance — science and disposal data verified against the South Australian sources listed above.</p>
         </footer>
       </section>
     </main>
